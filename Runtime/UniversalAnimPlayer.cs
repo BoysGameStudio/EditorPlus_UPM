@@ -111,6 +111,7 @@ public class UniversalAnimPlayer : MonoBehaviour
     private float _crossTimer;
     private AnimationMixerPlayable _activeMixer;
     private AnimationClipPlayable _previousPlayable;
+    // The clip currently fed to the playable graph. In preview we may use a sanitized clone.
     private bool _boundsApplied;
     private float _lastBoundsExtent;
     private bool _lastUpdateOffscreen;
@@ -120,6 +121,11 @@ public class UniversalAnimPlayer : MonoBehaviour
     private bool _isScrubbing;
     private readonly double _lastScrubEditorTime;
     private const double _scrubResumeDelay = 0.25;
+
+    // Original clip (as selected) and a sanitized preview clone used to suppress invalid AnimationEvents.
+    private AnimationClip _currentClipOrig;
+    [HideInInspector][SerializeField] private bool _ignoreAnimationEvents = true; public bool ignoreAnimationEvents { get => _ignoreAnimationEvents; set => _ignoreAnimationEvents = value; }
+    private readonly Dictionary<AnimationClip, AnimationClip> _sanitizedCache = new Dictionary<AnimationClip, AnimationClip>();
 
     public event Action<AnimationClip> OnClipChanged;
     public event Action<bool> OnPlayStateChanged;
@@ -142,6 +148,7 @@ public class UniversalAnimPlayer : MonoBehaviour
         EditorApplication.update -= EditorTick;
         DestroyGraph();
         DespawnModelIfTemp();
+        ClearSanitizedCache();
     }
 
     private void OnValidate()
@@ -267,7 +274,7 @@ public class UniversalAnimPlayer : MonoBehaviour
     private void RebindClipIfChanged()
     {
         var c = GetClipAtIndex();
-        if (c != _currentClip)
+        if (c != _currentClipOrig)
         {
             if (resetOnClipChange) normalizedTime = 0f;
             RebindClip(true);
@@ -293,25 +300,26 @@ public class UniversalAnimPlayer : MonoBehaviour
             _isCrossfading = false;
         }
         var c = GetClipAtIndex();
-        bool changed = c != _currentClip;
-        _currentClip = c;
-        _lastClipLength = c ? c.length : -1f;
+        bool changed = c != _currentClipOrig;
+        _currentClipOrig = c;
+        _currentClip = SelectPlayableClip(c);
+        _lastClipLength = _currentClip ? _currentClip.length : -1f;
         if (resetOnClipChange && doCrossfade == false) normalizedTime = Mathf.Clamp01(normalizedTime);
-        if (!c || !animator)
+        if (!_currentClip || !animator)
         {
             if (_currentPlayable.IsValid())
             {
                 _currentPlayable.Destroy();
                 _output.SetSourcePlayable(Playable.Null);
             }
-            if (changed) OnClipChanged?.Invoke(_currentClip);
+            if (changed) OnClipChanged?.Invoke(_currentClipOrig);
             return;
         }
-        if (retarget != RetargetMode.Generic && IsHumanoid(c))
+        if (retarget != RetargetMode.Generic && IsHumanoid(_currentClip))
         {
             // ensure humanoid avatar exists on animator
         }
-        var newPlayable = AnimationClipPlayable.Create(_graph, c);
+        var newPlayable = AnimationClipPlayable.Create(_graph, _currentClip);
         newPlayable.SetApplyFootIK(true);
         newPlayable.SetApplyPlayableIK(true);
         newPlayable.SetSpeed(0);
@@ -334,11 +342,11 @@ public class UniversalAnimPlayer : MonoBehaviour
         }
         if (changed)
         {
-            if (autoAssignModelFromClip && modelPrefab == null && _currentClip != null)
+            if (autoAssignModelFromClip && modelPrefab == null && _currentClipOrig != null)
             {
-                TryAutoAssignModelFromClip(_currentClip, false);
+                TryAutoAssignModelFromClip(_currentClipOrig, false);
             }
-            OnClipChanged?.Invoke(_currentClip);
+            OnClipChanged?.Invoke(_currentClipOrig);
         }
     }
 
@@ -555,6 +563,56 @@ public class UniversalAnimPlayer : MonoBehaviour
         if (resetTime) normalizedTime = 0f;
         RebindClip(false);
         SeekByNormalizedTime();
+    }
+
+    private AnimationClip SelectPlayableClip(AnimationClip original)
+    {
+        if (original == null) return null;
+        if (!ignoreAnimationEvents) return original;
+        // Return cached sanitized clone, or create one.
+        if (_sanitizedCache.TryGetValue(original, out var cached) && cached)
+            return cached;
+        var clone = Instantiate(original);
+        clone.name = original.name + " (Preview)";
+        clone.hideFlags = HideFlags.HideAndDontSave;
+        try
+        {
+            var events = AnimationUtility.GetAnimationEvents(clone);
+            if (events != null && events.Length > 0)
+            {
+                // Keep only events with a valid function name to avoid Unity errors during sampling.
+                List<AnimationEvent> filtered = new List<AnimationEvent>(events.Length);
+                for (int i = 0; i < events.Length; i++)
+                {
+                    var ev = events[i];
+                    if (!string.IsNullOrEmpty(ev.functionName))
+                        filtered.Add(ev);
+                }
+                if (filtered.Count != events.Length)
+                {
+                    AnimationUtility.SetAnimationEvents(clone, filtered.ToArray());
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Best-effort sanitization; if anything fails, still use the clone.
+        }
+        _sanitizedCache[original] = clone;
+        return clone;
+    }
+
+    private void ClearSanitizedCache()
+    {
+        if (_sanitizedCache.Count == 0) return;
+        foreach (var kv in _sanitizedCache)
+        {
+            if (kv.Value)
+            {
+                DestroyImmediate(kv.Value);
+            }
+        }
+        _sanitizedCache.Clear();
     }
 
     private void TryAutoAssignModelFromClip(AnimationClip clip, bool forced)

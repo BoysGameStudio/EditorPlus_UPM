@@ -12,7 +12,7 @@ Structure
     - EditorPlus.Editor.asmdef
     - UniversalAnimPlayer.cs
     - Drawers/ShowActionTimelineDrawer.cs
-    - SingleGOIsolationStage.cs
+  - ClipTimelinePreviewStage.cs
     - TimelineTrackPreviewBinder.cs
     - SceneTimelineTypes.cs
     - OdinInspectorUtils.cs

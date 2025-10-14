@@ -11,7 +11,7 @@ using UnityEngine.SceneManagement;
 using EditorPlus.SceneTimeline;
 using UnityEngine.Rendering;
 
-public class SingleGOIsolationStage : PreviewSceneStage
+public class ClipTimelinePreviewStage : PreviewSceneStage
 {
     private const int MaxOutlineSlots = 16;
     private const string OutlineColorsProperty = "_OutlineColors";
@@ -24,7 +24,7 @@ public class SingleGOIsolationStage : PreviewSceneStage
     private readonly Transform _originalParentTransform;
     private readonly int _originalSiblingIndex = -1;
     private readonly Scene _originalScene;
-    public GameObject _source;
+    public GameObject Target;
     private GameObject _stageInstance; // preview instance created in the stage (when using Prefab)
     private bool _movedOriginal;       // whether we moved the original object into the stage
     private GameObject _previewRoot;   // the actual root used for preview (instance or original)
@@ -44,16 +44,16 @@ public class SingleGOIsolationStage : PreviewSceneStage
 
     protected override GUIContent CreateHeaderContent()
     {
-        return new GUIContent(_source ? $"Isolated: {_source.name}" : "Isolated Object");
+        return new GUIContent(Target ? $"Preview: {Target.name}" : "Preview Object");
     }
 
     protected override bool OnOpenStage()
     {
         base.OnOpenStage();
-        if (_source)
+        if (Target)
         {
             // Attempt to instantiate a Prefab for preview; fallback to moving the original
-            if (TryInstantiatePlayerModelPrefab(_source, scene, out _stageInstance))
+            if (TryInstantiatePlayerModelPrefab(Target, scene, out _stageInstance))
             {
                 _movedOriginal = false;
                 _previewRoot = _stageInstance;
@@ -66,7 +66,7 @@ public class SingleGOIsolationStage : PreviewSceneStage
                 ApplyDepthOnlyToPreviewRenderers(_previewRoot);
 
                 // Re-route UniversalAnimPlayer to drive the animator on the preview instance
-                if (UniversalAnimPlayerReflection.TryFindUniversalAnimPlayer(_source, out _playerInstance, out _playerType))
+                if (UniversalAnimPlayerReflection.TryFindUniversalAnimPlayer(Target, out _playerInstance, out _playerType))
                 {
                     _originalPlayerAnimator = UniversalAnimPlayerReflection.GetPlayerAnimator(_playerInstance, _playerType);
                     _originalPlayerModelPrefab = UniversalAnimPlayerReflection.GetPlayerModelPrefab(_playerInstance, _playerType);
@@ -101,8 +101,8 @@ public class SingleGOIsolationStage : PreviewSceneStage
 
         EnsureSceneTimelineOutlineFeature(_previewRoot);
         CacheColorReceivers();
-    PaletteBus.Changed -= OnSceneTimelinePaletteChanged;
-    PaletteBus.Changed += OnSceneTimelinePaletteChanged;
+        PaletteBus.Changed -= OnSceneTimelinePaletteChanged;
+        PaletteBus.Changed += OnSceneTimelinePaletteChanged;
         // Ensure shaders and receivers start from a clean state.
         PushOutlineColors(EmptyPalette);
         DistributePalette(EmptyPalette);
@@ -112,25 +112,25 @@ public class SingleGOIsolationStage : PreviewSceneStage
     protected override void OnCloseStage()
     {
         base.OnCloseStage();
-    PaletteBus.Changed -= OnSceneTimelinePaletteChanged;
+        PaletteBus.Changed -= OnSceneTimelinePaletteChanged;
         PushOutlineColors(EmptyPalette);
         DistributePalette(EmptyPalette);
         _colorReceivers.Clear();
         _paletteByLabel.Clear();
 
-        if (_movedOriginal && _source)
+        if (_movedOriginal && Target)
         {
             // Restore back to original scene if still valid
             if (_originalScene.IsValid() && _originalParentTransform != null)
             {
-                SceneManager.MoveGameObjectToScene(_source, _originalScene);
+                SceneManager.MoveGameObjectToScene(Target, _originalScene);
                 if (_originalParentTransform)
                 {
-                    _source.transform.SetParent(_originalParentTransform, false);
+                    Target.transform.SetParent(_originalParentTransform, false);
                 }
                 if (_originalSiblingIndex >= 0)
                 {
-                    _source.transform.SetSiblingIndex(Mathf.Clamp(_originalSiblingIndex, 0, _source.transform.parent ? _source.transform.parent.childCount - 1 : _originalSiblingIndex));
+                    Target.transform.SetSiblingIndex(Mathf.Clamp(_originalSiblingIndex, 0, Target.transform.parent ? Target.transform.parent.childCount - 1 : _originalSiblingIndex));
                 }
             }
         }
@@ -148,7 +148,7 @@ public class SingleGOIsolationStage : PreviewSceneStage
             _depthOnlyMat = null;
         }
         // Restore UniversalAnimPlayer bindings/state
-        if (_source && _playerInstance != null)
+        if (Target && _playerInstance != null)
         {
             // Restore animator target
             var currentAnim = UniversalAnimPlayerReflection.GetPlayerAnimator(_playerInstance, _playerType);
@@ -623,13 +623,11 @@ public class SingleGOIsolationStage : PreviewSceneStage
             {
                 return settingsType.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             }
-
             var shaderField = FindField("shader");
             if (shaderField != null)
             {
                 if (shaderField.GetValue(settings) is not Shader shader || shader == null)
                 {
-                    Shader locatedShader = null;
                     // Try a few likely shader names to keep this feature generic across projects
                     string[] candidates = new[]
                     {
@@ -637,6 +635,7 @@ public class SingleGOIsolationStage : PreviewSceneStage
                         "Hidden/SceneTimelineOutline",
                         "Hidden/BoysGameStudio/SceneTimelineOutline",
                     };
+                    Shader locatedShader = null;
                     for (int i = 0; i < candidates.Length && locatedShader == null; i++)
                     {
                         var s = Shader.Find(candidates[i]);
@@ -684,28 +683,20 @@ public class SingleGOIsolationStage : PreviewSceneStage
                             for (int i = 0; i < rends.Length; i++)
                             {
                                 var r = rends[i];
-                                if (!r) continue;
                                 int l = r.gameObject.layer;
-                                if (l >= 0 && l < 32)
-                                {
-                                    maskValue |= (1 << l);
-                                }
+                                maskValue |= (1 << l);
                             }
                         }
-                        // Always include root layer as well
                         int rootLayer = previewRoot.layer;
-                        if (rootLayer >= 0 && rootLayer < 32)
-                        {
-                            maskValue |= (1 << rootLayer);
-                        }
+                        maskValue |= (1 << rootLayer);
                     }
-                    catch { maskValue = -1; }
+                    catch { }
                     if (maskValue == 0)
                     {
-                        maskValue = -1; // fallback to Everything if nothing detected
+                        maskValue = -1; // Everything
                     }
                 }
-                // Apply mask using only supported types (int or UnityEngine.LayerMask)
+                // Assign whichever field type is present
                 var fieldType = layerMaskField.FieldType;
                 if (fieldType == typeof(int))
                 {
@@ -851,7 +842,7 @@ public class SingleGOIsolationStage : PreviewSceneStage
     {
         if (!root) return;
         // If any receiver already exists, skip
-    var existingReceiver = root.GetComponentInChildren<EditorPlus.SceneTimeline.ITimelineTrackColorReceiver>(true);
+        var existingReceiver = root.GetComponentInChildren<EditorPlus.SceneTimeline.ITimelineTrackColorReceiver>(true);
         if (existingReceiver != null) return;
 
         // Add a default TimelineTrackPreviewBinder on the root so it can publish outline indices to globals
