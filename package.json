@@ -1,0 +1,16 @@
+{
+    "name": "com.boysgame.editorplus",
+    "displayName": "Editor Plus",
+    "version": "0.0.1",
+    "unity": "2023.1",
+    "description": "",
+    "author": {
+        "name": "Boys",
+        "url": ""
+    },
+    "keywords": [
+    ],
+    "category": "Unity",
+    "samples": [
+    ]
+}
