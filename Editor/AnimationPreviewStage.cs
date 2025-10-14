@@ -12,7 +12,7 @@ using EditorPlus.SceneTimeline;
 using EditorPlus.Preview;
 using UnityEngine.Rendering;
 
-public class ActionPreviewStage : PreviewSceneStage
+public class AnimationPreviewStage : PreviewSceneStage
 {
     private const int MaxOutlineSlots = 16;
     private const string OutlineColorsProperty = "_OutlineColors";

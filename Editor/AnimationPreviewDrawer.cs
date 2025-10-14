@@ -16,7 +16,7 @@ using EditorPlus.SceneTimeline;
 /// <summary>
 /// Field-level drawer that renders: 1) the AnimationClip field itself; 2) a timeline; 3) tracks discovered via [TimelineTrack].
 /// </summary>
-public sealed class ShowActionTimelineDrawer : OdinAttributeDrawer<TimelinePreviewAttribute, AnimationClip>
+public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPreviewAttribute, AnimationClip>
 {
     private const float TimelineLabelWidth = 180f;
     private const float TrackRowHeight = 24f;
@@ -533,7 +533,7 @@ public sealed class ShowActionTimelineDrawer : OdinAttributeDrawer<TimelinePrevi
 
         foreach (var member in members)
         {
-            var attribute = member.GetCustomAttribute<TimelineTrackAttribute>();
+            var attribute = member.GetCustomAttribute<AnimationEventAttribute>();
             if (attribute == null)
             {
                 continue;
@@ -1303,12 +1303,12 @@ public sealed class ShowActionTimelineDrawer : OdinAttributeDrawer<TimelinePrevi
     {
         public static bool HasPreview(UnityEngine.Object target)
         {
-            return target is ITimelinePreviewHost host && host.HasActivePreview;
+            return target is IAnimationPreviewHost host && host.HasActivePreview;
         }
 
         public static float ResolvePreviewFPS(UnityEngine.Object target, float fallback)
         {
-            if (target is ITimelinePreviewHost host)
+            if (target is IAnimationPreviewHost host)
             {
                 float v = host.ResolvePreviewFPS(fallback);
                 if (v > 0f) return v;
@@ -1319,7 +1319,7 @@ public sealed class ShowActionTimelineDrawer : OdinAttributeDrawer<TimelinePrevi
         public static bool TryGetPreviewFrame(UnityEngine.Object target, out int frame)
         {
             frame = -1;
-            if (target is ITimelinePreviewHost host)
+            if (target is IAnimationPreviewHost host)
             {
                 frame = host.GetPreviewFrame();
                 return frame >= 0;
@@ -1329,7 +1329,7 @@ public sealed class ShowActionTimelineDrawer : OdinAttributeDrawer<TimelinePrevi
 
         public static void SeekPreviewFrame(UnityEngine.Object target, int frame)
         {
-            if (target is ITimelinePreviewHost host)
+            if (target is IAnimationPreviewHost host)
             {
                 host.SeekPreviewFrame(frame);
             }
@@ -1337,12 +1337,12 @@ public sealed class ShowActionTimelineDrawer : OdinAttributeDrawer<TimelinePrevi
 
         public static bool CanSeekPreview(UnityEngine.Object target)
         {
-            return target is ITimelinePreviewHost;
+            return target is IAnimationPreviewHost;
         }
 
         public static void PausePreviewIfPlaying(UnityEngine.Object target)
         {
-            if (target is ITimelinePreviewHost host && host.IsPreviewPlaying)
+            if (target is IAnimationPreviewHost host && host.IsPreviewPlaying)
             {
                 host.SetPreviewPlaying(false);
             }
@@ -1350,12 +1350,12 @@ public sealed class ShowActionTimelineDrawer : OdinAttributeDrawer<TimelinePrevi
 
         public static bool IsPreviewPlaying(UnityEngine.Object target)
         {
-            return target is ITimelinePreviewHost host && host.IsPreviewPlaying;
+            return target is IAnimationPreviewHost host && host.IsPreviewPlaying;
         }
 
         public static void SetPlaying(UnityEngine.Object target, bool playing)
         {
-            if (target is ITimelinePreviewHost host)
+            if (target is IAnimationPreviewHost host)
             {
                 host.SetPreviewPlaying(playing);
             }
@@ -1363,12 +1363,12 @@ public sealed class ShowActionTimelineDrawer : OdinAttributeDrawer<TimelinePrevi
 
         public static bool TryEnsurePreviewInfrastructure(UnityEngine.Object target, bool resetTime)
         {
-            return target is ITimelinePreviewHost host && host.EnsurePreviewInfrastructure(resetTime);
+            return target is IAnimationPreviewHost host && host.EnsurePreviewInfrastructure(resetTime);
         }
 
         public static void TrySyncPlayerClip(UnityEngine.Object target, bool resetTime)
         {
-            if (target is ITimelinePreviewHost host)
+            if (target is IAnimationPreviewHost host)
             {
                 host.SyncPlayerClip(resetTime);
             }

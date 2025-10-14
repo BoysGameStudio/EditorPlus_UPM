@@ -3,11 +3,7 @@ using UnityEngine;
 
 namespace EditorPlus.SceneTimeline
 {
-    /// <summary>
-    /// Compile-time contract for hosts that want EditorPlus' ShowActionTimeline to drive their preview playback.
-    /// Implement this on your ScriptableObject/MonoBehaviour that owns the AnimationClip field.
-    /// </summary>
-    public interface ITimelinePreviewHost
+    public interface IAnimationPreviewHost
     {
         /// <summary>True if a preview player is available and can be driven.</summary>
         bool HasActivePreview { get; }

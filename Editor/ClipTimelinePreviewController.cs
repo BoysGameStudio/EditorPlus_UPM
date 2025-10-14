@@ -10,7 +10,7 @@ using UnityEngine.SceneManagement;
 [InitializeOnLoad]
 internal sealed class ClipTimelinePreviewController : IPreviewStageController
 {
-    private ActionPreviewStage _stage;
+    private AnimationPreviewStage _stage;
 
     static ClipTimelinePreviewController()
     {
@@ -28,7 +28,7 @@ internal sealed class ClipTimelinePreviewController : IPreviewStageController
         // Close any existing stage we own to ensure a clean open
         Close();
 
-        _stage = ScriptableObject.CreateInstance<ActionPreviewStage>();
+        _stage = ScriptableObject.CreateInstance<AnimationPreviewStage>();
         _stage.Target = target;
         StageUtility.GoToStage(_stage, true);
     }
