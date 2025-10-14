@@ -1295,297 +1295,77 @@ public sealed class ShowActionTimelineDrawer : OdinAttributeDrawer<ShowActionTim
 
     private static class ActiveActionIntegration
     {
-        private sealed class Map
-        {
-            public MethodInfo GetPreviewFPS;
-            public MethodInfo GetCurrentFrame;
-            public MethodInfo SeekFrame;
-            public MethodInfo SetPlayingMethod;
-            public MethodInfo HasActivePreviewPlayerStatic;
-            public FieldInfo PreviewPlayingStaticField;
-            public MethodInfo EnsurePreviewInfrastructureBool;
-            public MethodInfo SyncPlayerClipBool;
-        }
-
-        private static readonly Dictionary<Type, Map> Cache = new();
-
-        private static Map GetMap(Type type)
-        {
-            if (type == null) return null;
-            if (Cache.TryGetValue(type, out var existing)) return existing;
-
-            var flagsInst = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            var flagsStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy;
-            var map = new Map();
-
-            try
-            {
-                map.GetPreviewFPS = type.GetMethod("ResolvePreviewFPS", flagsInst, null, Type.EmptyTypes, null)
-                                    ?? type.GetMethod("GetPreviewFPS", flagsInst, null, Type.EmptyTypes, null);
-            }
-            catch { }
-
-            try
-            {
-                map.GetCurrentFrame = type.GetMethod("GetPreviewCurrentFrameUnsafe", flagsInst, null, Type.EmptyTypes, null)
-                                    ?? type.GetMethod("GetAnimationCurrentFrame", flagsInst, null, Type.EmptyTypes, null);
-            }
-            catch { }
-
-            try
-            {
-                map.SeekFrame = type.GetMethod("SeekPreviewFrameEditor", flagsInst, null, new[] { typeof(int) }, null)
-                              ?? type.GetMethod("SeekFrame", flagsInst, null, new[] { typeof(int) }, null);
-            }
-            catch { }
-
-            try
-            {
-                // Try common overloads first, then any SetPlaying as a last resort
-                map.SetPlayingMethod = type.GetMethod("SetPlaying", flagsInst, null, new[] { typeof(bool), typeof(bool) }, null)
-                                      ?? type.GetMethod("SetPlaying", flagsInst, null, new[] { typeof(bool) }, null)
-                                      ?? type.GetMethod("SetPlaying", flagsInst);
-            }
-            catch { }
-
-            try
-            {
-                map.EnsurePreviewInfrastructureBool = type.GetMethod("EnsurePreviewInfrastructure", flagsInst, null, new[] { typeof(bool) }, null);
-            }
-            catch { }
-
-            try
-            {
-                map.SyncPlayerClipBool = type.GetMethod("SyncPlayerClip", flagsInst, null, new[] { typeof(bool) }, null);
-            }
-            catch { }
-
-            try
-            {
-                // Walk up inheritance to find static method declared on a base class
-                for (var tt = type; tt != null && map.HasActivePreviewPlayerStatic == null; tt = tt.BaseType)
-                {
-                    map.HasActivePreviewPlayerStatic = tt.GetMethod("HasActivePreviewPlayer", flagsStatic, null, Type.EmptyTypes, null);
-                }
-            }
-            catch { }
-
-            try
-            {
-                // Private static fields are not surfaced by FlattenHierarchy, so search base chain manually
-                for (var tt = type; tt != null && map.PreviewPlayingStaticField == null; tt = tt.BaseType)
-                {
-                    map.PreviewPlayingStaticField = tt.GetField("_previewPlaying", flagsStatic)
-                                                  ?? tt.GetField("m_PreviewPlaying", flagsStatic)
-                                                  ?? tt.GetField("PreviewPlaying", flagsStatic);
-                }
-            }
-            catch { }
-
-            Cache[type] = map;
-            return map;
-        }
-
         public static bool HasPreview(UnityEngine.Object target)
         {
-            if (target == null) return false;
-            var map = GetMap(target.GetType());
-            if (map == null || map.HasActivePreviewPlayerStatic == null) return false;
-            try
-            {
-                var value = map.HasActivePreviewPlayerStatic.Invoke(null, Array.Empty<object>());
-                return value is bool b && b;
-            }
-            catch { return false; }
+            return target is ITimelinePreviewHost host && host.HasActivePreview;
         }
 
         public static float ResolvePreviewFPS(UnityEngine.Object target, float fallback)
         {
-            if (target == null) return fallback;
-            // 1) Prefer the UI slider value on the owner (PreviewFPS or _previewFPS)
-            if (TryReadPreviewFPSMember(target, out var fromMember))
+            if (target is ITimelinePreviewHost host)
             {
-                return Mathf.Clamp(fromMember, 1, 240);
+                float v = host.ResolvePreviewFPS(fallback);
+                if (v > 0f) return v;
             }
-
-            // 2) Fallback to an instance method on the owner (ResolvePreviewFPS/GetPreviewFPS)
-            var map = GetMap(target.GetType());
-            if (map?.GetPreviewFPS != null)
-            {
-                try
-                {
-                    var value = map.GetPreviewFPS.Invoke(target, Array.Empty<object>());
-                    if (value is float fps && fps > 0f) return fps;
-                }
-                catch { }
-            }
-
-            // 3) Final fallback to clip fps
             return fallback;
-        }
-
-        private static bool TryReadPreviewFPSMember(UnityEngine.Object target, out int fps)
-        {
-            fps = -1;
-            try
-            {
-                var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
-                var t = target.GetType();
-
-                // Search for a readable int property named PreviewFPS up the inheritance chain
-                for (var tt = t; tt != null; tt = tt.BaseType)
-                {
-                    var p = tt.GetProperty("PreviewFPS", flags, null, typeof(int), Type.EmptyTypes, null);
-                    if (p != null && p.CanRead)
-                    {
-                        var v = p.GetValue(target, null);
-                        if (v is int pi && pi > 0)
-                        {
-                            fps = pi; return true;
-                        }
-                    }
-                }
-
-                // Search for an int field named _previewFPS (or common variants) up the inheritance chain
-                for (var tt = t; tt != null; tt = tt.BaseType)
-                {
-                    var f = tt.GetField("_previewFPS", flags)
-                         ?? tt.GetField("PreviewFPS", flags)
-                         ?? tt.GetField("m_PreviewFPS", flags);
-                    if (f != null && f.FieldType == typeof(int))
-                    {
-                        var v = f.GetValue(target);
-                        if (v is int fi && fi > 0)
-                        {
-                            fps = fi; return true;
-                        }
-                    }
-                }
-            }
-            catch { }
-            return false;
         }
 
         public static bool TryGetPreviewFrame(UnityEngine.Object target, out int frame)
         {
             frame = -1;
-            if (target == null) return false;
-            var map = GetMap(target.GetType());
-            if (map?.GetCurrentFrame == null) return false;
-            try
+            if (target is ITimelinePreviewHost host)
             {
-                var value = map.GetCurrentFrame.Invoke(target, Array.Empty<object>());
-                if (value is int f) { frame = f; return true; }
+                frame = host.GetPreviewFrame();
+                return frame >= 0;
             }
-            catch { }
             return false;
         }
 
         public static void SeekPreviewFrame(UnityEngine.Object target, int frame)
         {
-            if (target == null) return;
-            var map = GetMap(target.GetType());
-            if (map?.SeekFrame == null) return;
-            try
+            if (target is ITimelinePreviewHost host)
             {
-                SeekPreviewArgs[0] = frame;
-                map.SeekFrame.Invoke(target, SeekPreviewArgs);
+                host.SeekPreviewFrame(frame);
             }
-            catch { }
         }
 
         public static bool CanSeekPreview(UnityEngine.Object target)
         {
-            if (target == null) return false;
-            var map = GetMap(target.GetType());
-            return map?.SeekFrame != null;
+            return target is ITimelinePreviewHost;
         }
 
         public static void PausePreviewIfPlaying(UnityEngine.Object target)
         {
-            if (target == null) return;
-            var map = GetMap(target.GetType());
-            if (map == null) return;
-
-            bool isPlaying = false;
-            isPlaying = IsPreviewPlaying(target);
-            if (!isPlaying && map.SetPlayingMethod == null) return;
-
-            try
+            if (target is ITimelinePreviewHost host && host.IsPreviewPlaying)
             {
-                // Prefer explicit pause if method is available; otherwise do nothing
-                InvokeSetPlaying(map, target, false);
+                host.SetPreviewPlaying(false);
             }
-            catch { }
         }
 
         public static bool IsPreviewPlaying(UnityEngine.Object target)
         {
-            if (target == null) return false;
-            var map = GetMap(target.GetType());
-            if (map?.PreviewPlayingStaticField == null) return false;
-            try
-            {
-                var value = map.PreviewPlayingStaticField.GetValue(null);
-                return value is bool b && b;
-            }
-            catch { return false; }
+            return target is ITimelinePreviewHost host && host.IsPreviewPlaying;
         }
 
         public static void SetPlaying(UnityEngine.Object target, bool playing)
         {
-            if (target == null) return;
-            var map = GetMap(target.GetType());
-            if (map?.SetPlayingMethod == null) return;
-            try
+            if (target is ITimelinePreviewHost host)
             {
-                InvokeSetPlaying(map, target, playing);
-            }
-            catch { }
-        }
-
-        private static void InvokeSetPlaying(Map map, UnityEngine.Object target, bool playing)
-        {
-            if (map?.SetPlayingMethod == null) return;
-            var parms = map.SetPlayingMethod.GetParameters();
-            if (parms.Length == 2)
-            {
-                map.SetPlayingMethod.Invoke(target, new object[] { playing, false });
-            }
-            else if (parms.Length == 1)
-            {
-                map.SetPlayingMethod.Invoke(target, new object[] { playing });
-            }
-            else
-            {
-                // Last resort: try invoke with no args (may toggle)
-                map.SetPlayingMethod.Invoke(target, Array.Empty<object>());
+                host.SetPreviewPlaying(playing);
             }
         }
 
         public static bool TryEnsurePreviewInfrastructure(UnityEngine.Object target, bool resetTime)
         {
-            if (target == null) return false;
-            var map = GetMap(target.GetType());
-            if (map?.EnsurePreviewInfrastructureBool == null) return false;
-            try
-            {
-                var result = map.EnsurePreviewInfrastructureBool.Invoke(target, new object[] { resetTime });
-                return result is bool b && b;
-            }
-            catch { return false; }
+            return target is ITimelinePreviewHost host && host.EnsurePreviewInfrastructure(resetTime);
         }
 
         public static void TrySyncPlayerClip(UnityEngine.Object target, bool resetTime)
         {
-            if (target == null) return;
-            var map = GetMap(target.GetType());
-            if (map?.SyncPlayerClipBool == null) return;
-            try
+            if (target is ITimelinePreviewHost host)
             {
-                map.SyncPlayerClipBool.Invoke(target, new object[] { resetTime });
+                host.SyncPlayerClip(resetTime);
             }
-            catch { }
         }
     }
 
