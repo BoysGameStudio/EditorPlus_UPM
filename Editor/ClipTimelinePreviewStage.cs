@@ -9,6 +9,7 @@ using UnityEditor.Experimental.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using EditorPlus.SceneTimeline;
+using EditorPlus.Preview;
 using UnityEngine.Rendering;
 
 public class ClipTimelinePreviewStage : PreviewSceneStage
@@ -35,8 +36,7 @@ public class ClipTimelinePreviewStage : PreviewSceneStage
     private Animator _originalPlayerAnimator;
     private GameObject _originalPlayerModelPrefab;
     private bool _suppressedLocalSpawn;
-    private object _playerInstance; // reflected UniversalAnimPlayer instance (optional)
-    private Type _playerType;       // reflected type cache
+    private UniversalAnimPlayer _playerInstance; // direct reference
 
     // Material swapping to hide fill in preview (show outline only)
     private readonly Dictionary<Renderer, Material[]> _originalMaterials = new Dictionary<Renderer, Material[]>(64);
@@ -66,10 +66,11 @@ public class ClipTimelinePreviewStage : PreviewSceneStage
                 ApplyDepthOnlyToPreviewRenderers(_previewRoot);
 
                 // Re-route UniversalAnimPlayer to drive the animator on the preview instance
-                if (UniversalAnimPlayerReflection.TryFindUniversalAnimPlayer(Target, out _playerInstance, out _playerType))
+                _playerInstance = Target ? Target.GetComponent<UniversalAnimPlayer>() : null;
+                if (_playerInstance != null)
                 {
-                    _originalPlayerAnimator = UniversalAnimPlayerReflection.GetPlayerAnimator(_playerInstance, _playerType);
-                    _originalPlayerModelPrefab = UniversalAnimPlayerReflection.GetPlayerModelPrefab(_playerInstance, _playerType);
+                    _originalPlayerAnimator = _playerInstance.animator;
+                    _originalPlayerModelPrefab = _playerInstance.modelPrefab;
 
                     var instAnimator = _stageInstance.GetComponentInChildren<Animator>(true);
                     if (instAnimator != null)
@@ -78,10 +79,10 @@ public class ClipTimelinePreviewStage : PreviewSceneStage
                         if (_originalPlayerModelPrefab != null)
                         {
                             _suppressedLocalSpawn = true;
-                            UniversalAnimPlayerReflection.SetPlayerModelPrefab(_playerInstance, _playerType, null); // setter also despawns via EnsureModelAndAnimator
-                            UniversalAnimPlayerReflection.CallPlayerDespawnModelIfTemp(_playerInstance, _playerType);
+                            _playerInstance.modelPrefab = null; // setter also despawns via EnsureModelAndAnimator
+                            _playerInstance.DespawnModelIfTemp();
                         }
-                        UniversalAnimPlayerReflection.SetPlayerAnimator(_playerInstance, _playerType, instAnimator); // bind output to stage instance
+                        _playerInstance.animator = instAnimator; // bind output to stage instance
                     }
                     else
                     {
@@ -151,22 +152,21 @@ public class ClipTimelinePreviewStage : PreviewSceneStage
         if (Target && _playerInstance != null)
         {
             // Restore animator target
-            var currentAnim = UniversalAnimPlayerReflection.GetPlayerAnimator(_playerInstance, _playerType);
+            var currentAnim = _playerInstance.animator;
             if (_originalPlayerAnimator != null && currentAnim != _originalPlayerAnimator)
             {
-                UniversalAnimPlayerReflection.SetPlayerAnimator(_playerInstance, _playerType, _originalPlayerAnimator);
+                _playerInstance.animator = _originalPlayerAnimator;
             }
             _originalPlayerAnimator = null;
 
             // Restore original model prefab (and allow local spawn again)
             if (_suppressedLocalSpawn)
             {
-                UniversalAnimPlayerReflection.SetPlayerModelPrefab(_playerInstance, _playerType, _originalPlayerModelPrefab); // setter will respawn as needed
+                _playerInstance.modelPrefab = _originalPlayerModelPrefab; // setter will respawn as needed
                 _suppressedLocalSpawn = false;
             }
             _originalPlayerModelPrefab = null;
             _playerInstance = null;
-            _playerType = null;
         }
         _previewRoot = null;
         _movedOriginal = false;
@@ -444,11 +444,12 @@ public class ClipTimelinePreviewStage : PreviewSceneStage
         }
 
         // Read the model prefab from UniversalAnimPlayer (if present) on the preview root
-        if (!UniversalAnimPlayerReflection.TryFindUniversalAnimPlayer(source, out var player, out var playerType))
+        var player = source.GetComponent<UniversalAnimPlayer>();
+        if (player == null)
         {
             return false;
         }
-        var asset = UniversalAnimPlayerReflection.GetPlayerModelPrefab(player, playerType);
+        var asset = player.modelPrefab;
         if (asset == null)
         {
             return false;
@@ -902,100 +903,5 @@ public class ClipTimelinePreviewStage : PreviewSceneStage
 
 // Timeline receiver contracts moved to EditorPlus.SceneTimeline namespace (see SceneTimelineTypes.cs)
 
-// ---------------- UniversalAnimPlayer Reflection Helpers ----------------
-static class UniversalAnimPlayerReflection
-{
-    public static bool TryFindUniversalAnimPlayer(GameObject root, out object instance, out Type type)
-    {
-        instance = null; type = null;
-        if (!root) return false;
-        var comp = FindComponentByTypeName(root, "UniversalAnimPlayer");
-        if (!comp) return false;
-        instance = comp; type = comp.GetType();
-        return true;
-    }
-
-    public static Animator GetPlayerAnimator(object player, Type type)
-    {
-        return GetProp<Animator>(player, type, "animator");
-    }
-
-    public static void SetPlayerAnimator(object player, Type type, Animator animator)
-    {
-        SetProp(player, type, "animator", animator);
-    }
-
-    public static GameObject GetPlayerModelPrefab(object player, Type type)
-    {
-        return GetProp<GameObject>(player, type, "modelPrefab");
-    }
-
-    public static void SetPlayerModelPrefab(object player, Type type, GameObject prefab)
-    {
-        SetProp(player, type, "modelPrefab", prefab);
-    }
-
-    public static void CallPlayerDespawnModelIfTemp(object player, Type type)
-    {
-        var m = type.GetMethod("DespawnModelIfTemp", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        m?.Invoke(player, null);
-    }
-
-    private static T GetProp<T>(object obj, Type type, string name) where T : UnityEngine.Object
-    {
-        if (obj == null || type == null) return null;
-        try
-        {
-            var p = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (p != null && typeof(T).IsAssignableFrom(p.PropertyType))
-            {
-                return (T)p.GetValue(obj, null);
-            }
-            var f = type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (f != null && typeof(T).IsAssignableFrom(f.FieldType))
-            {
-                return (T)f.GetValue(obj);
-            }
-        }
-        catch { }
-        return null;
-    }
-
-    private static void SetProp(object obj, Type type, string name, object value)
-    {
-        if (obj == null || type == null) return;
-        try
-        {
-            var p = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (p != null && p.CanWrite)
-            {
-                p.SetValue(obj, value, null);
-                return;
-            }
-            var f = type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (f != null)
-            {
-                f.SetValue(obj, value);
-                return;
-            }
-        }
-        catch { }
-    }
-
-    private static Component FindComponentByTypeName(GameObject root, string typeName)
-    {
-        var comps = root.GetComponentsInChildren<Component>(true);
-        for (int i = 0; i < comps.Length; i++)
-        {
-            var c = comps[i];
-            if (!c) continue;
-            var t = c.GetType();
-            if (string.Equals(t.Name, typeName, StringComparison.Ordinal) || string.Equals(t.FullName, typeName, StringComparison.Ordinal))
-            {
-                return c;
-            }
-        }
-        return null;
-    }
-}
+// Reflection helpers removed – using typed UniversalAnimPlayer access.
 #endif
