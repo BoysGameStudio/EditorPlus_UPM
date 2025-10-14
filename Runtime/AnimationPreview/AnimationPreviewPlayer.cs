@@ -1,6 +1,6 @@
-// UniversalAnimPlayer.cs (Editor-only minimal backend)
+// AnimationPreviewPlayer.cs (Editor-only minimal backend)
 // Purpose:
-//   Lightweight animation preview driver used exclusively by editor tooling.
+//   Lightweight animation preview driver used by editor tooling.
 //   - Wraps a PlayableGraph (AnimationClipPlayable + optional crossfade mixer)
 //   - Provides programmatic control (Play/Pause/Stop/Seek by frame or normalized)
 //   - Optional auto model (Prefab) assignment from clip asset path
@@ -19,7 +19,7 @@ using UnityEngine.Playables;
 
 [ExecuteAlways]
 [DisallowMultipleComponent]
-public class UniversalAnimPlayer : MonoBehaviour
+public class AnimationPreviewPlayer : MonoBehaviour
 {
     public enum RetargetMode { Auto, Humanoid, Generic }
 
@@ -119,7 +119,7 @@ public class UniversalAnimPlayer : MonoBehaviour
     [HideInInspector][SerializeField] private bool _resetOnClipChange = false; public bool resetOnClipChange { get => _resetOnClipChange; set => _resetOnClipChange = value; }
     private double _lastEditorTime;
     private bool _isScrubbing;
-    private readonly double _lastScrubEditorTime;
+    private double _lastScrubEditorTime;
     private const double _scrubResumeDelay = 0.25;
 
     // Original clip (as selected) and a sanitized preview clone used to suppress invalid AnimationEvents.
@@ -512,6 +512,9 @@ public class UniversalAnimPlayer : MonoBehaviour
     public void SeekNormalized(float n)
     {
         float clamped = Mathf.Clamp01(n);
+        // Mark scrubbing and record time so EditorTick can resume correctly
+        _isScrubbing = true;
+        _lastScrubEditorTime = EditorApplication.timeSinceStartup;
         if (!Mathf.Approximately(clamped, normalizedTime))
         {
             normalizedTime = clamped;
@@ -532,6 +535,9 @@ public class UniversalAnimPlayer : MonoBehaviour
         float len = Mathf.Max(_currentClip.length, 0.0001f);
         float sec = frame / fps;
         float n = Mathf.Clamp01(sec / len);
+        // Mark scrubbing and record time so EditorTick can resume correctly
+        _isScrubbing = true;
+        _lastScrubEditorTime = EditorApplication.timeSinceStartup;
         if (!Mathf.Approximately(n, normalizedTime))
         {
             normalizedTime = n;

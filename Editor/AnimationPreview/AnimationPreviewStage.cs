@@ -36,7 +36,7 @@ public class AnimationPreviewStage : PreviewSceneStage
     private Animator _originalPlayerAnimator;
     private GameObject _originalPlayerModelPrefab;
     private bool _suppressedLocalSpawn;
-    private UniversalAnimPlayer _playerInstance; // direct reference
+    private AnimationPreviewPlayer _playerInstance; // direct reference
 
     // Material swapping to hide fill in preview (show outline only)
     private readonly Dictionary<Renderer, Material[]> _originalMaterials = new Dictionary<Renderer, Material[]>(64);
@@ -66,7 +66,7 @@ public class AnimationPreviewStage : PreviewSceneStage
                 ApplyDepthOnlyToPreviewRenderers(_previewRoot);
 
                 // Re-route UniversalAnimPlayer to drive the animator on the preview instance
-                _playerInstance = Target ? Target.GetComponent<UniversalAnimPlayer>() : null;
+                _playerInstance = Target ? Target.GetComponent<AnimationPreviewPlayer>() : null;
                 if (_playerInstance != null)
                 {
                     _originalPlayerAnimator = _playerInstance.animator;
@@ -444,7 +444,7 @@ public class AnimationPreviewStage : PreviewSceneStage
         }
 
         // Read the model prefab from UniversalAnimPlayer (if present) on the preview root
-        var player = source.GetComponent<UniversalAnimPlayer>();
+        var player = source.GetComponent<AnimationPreviewPlayer>();
         if (player == null)
         {
             return false;
