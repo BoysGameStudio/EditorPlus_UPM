@@ -8,14 +8,14 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 [InitializeOnLoad]
-internal sealed class ClipTimelinePreviewController : IPreviewStageController
+internal sealed class AnimationPreviewController : IPreviewStageController
 {
     private AnimationPreviewStage _stage;
 
-    static ClipTimelinePreviewController()
+    static AnimationPreviewController()
     {
         // Register this controller on load
-        PreviewStageAPI.Impl = new ClipTimelinePreviewController();
+        PreviewStageAPI.Impl = new AnimationPreviewController();
     }
 
     public void Open(GameObject target)
