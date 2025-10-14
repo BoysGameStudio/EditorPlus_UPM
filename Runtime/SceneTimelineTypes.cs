@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace EditorPlus.SceneTimeline
+namespace EditorPlus.AnimationPreview
 {
     // A lightweight, generic palette entry used by EditorPlus timeline preview tools.
     [Serializable]

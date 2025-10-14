@@ -1,7 +1,7 @@
 #if UNITY_EDITOR
 using UnityEngine;
 
-namespace EditorPlus.SceneTimeline
+namespace EditorPlus.AnimationPreview
 {
     public interface IAnimationPreviewHost
     {

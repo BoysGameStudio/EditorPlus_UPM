@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 using UnityEngine;
 
-namespace EditorPlus.SceneTimeline
+namespace EditorPlus.AnimationPreview
 {
     [ExecuteAlways]
     [DisallowMultipleComponent]

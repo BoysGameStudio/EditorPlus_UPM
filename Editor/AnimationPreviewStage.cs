@@ -8,7 +8,7 @@ using UnityEditor.SceneManagement;
 using UnityEditor.Experimental.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using EditorPlus.SceneTimeline;
+using EditorPlus.AnimationPreview;
 using EditorPlus.Preview;
 using UnityEngine.Rendering;
 
@@ -843,11 +843,11 @@ public class AnimationPreviewStage : PreviewSceneStage
     {
         if (!root) return;
         // If any receiver already exists, skip
-        var existingReceiver = root.GetComponentInChildren<EditorPlus.SceneTimeline.ITimelineTrackColorReceiver>(true);
+        var existingReceiver = root.GetComponentInChildren<EditorPlus.AnimationPreview.ITimelineTrackColorReceiver>(true);
         if (existingReceiver != null) return;
 
         // Add a default TimelineTrackPreviewBinder on the root so it can publish outline indices to globals
-        root.AddComponent<EditorPlus.SceneTimeline.TimelinePaletteBinder>();
+        root.AddComponent<EditorPlus.AnimationPreview.TimelinePaletteBinder>();
     }
 
     private void ApplyDepthOnlyToPreviewRenderers(GameObject root)
@@ -901,7 +901,7 @@ public class AnimationPreviewStage : PreviewSceneStage
     }
 }
 
-// Timeline receiver contracts moved to EditorPlus.SceneTimeline namespace (see SceneTimelineTypes.cs)
+// Timeline receiver contracts moved to EditorPlus.AnimationPreview namespace (see SceneTimelineTypes.cs)
 
 // Reflection helpers removed – using typed UniversalAnimPlayer access.
 #endif

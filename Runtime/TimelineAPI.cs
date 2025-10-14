@@ -1,7 +1,7 @@
 #if UNITY_EDITOR
 using UnityEngine;
 
-namespace EditorPlus.SceneTimeline
+namespace EditorPlus.AnimationPreview
 {
     /// <summary>
     /// Editor-only hook surface so hosts can draw the ShowActionTimeline UI at a custom spot
