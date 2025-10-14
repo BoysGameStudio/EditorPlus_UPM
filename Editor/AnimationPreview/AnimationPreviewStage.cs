@@ -9,7 +9,7 @@ using UnityEditor.Experimental.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using EditorPlus.AnimationPreview;
-using EditorPlus.Preview;
+using EditorPlus.AnimationPreview;
 using UnityEngine.Rendering;
 
 public class AnimationPreviewStage : PreviewSceneStage

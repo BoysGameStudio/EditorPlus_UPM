@@ -1,5 +1,5 @@
 #if UNITY_EDITOR
-using EditorPlus.Preview;
+using EditorPlus.AnimationPreview;
 
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -15,7 +15,7 @@ internal sealed class AnimationPreviewController : IPreviewStageController
     static AnimationPreviewController()
     {
         // Register this controller on load
-        PreviewStageAPI.Impl = new AnimationPreviewController();
+        AnimationPreviewStageBridge.Impl = new AnimationPreviewController();
     }
 
     public void Open(GameObject target)

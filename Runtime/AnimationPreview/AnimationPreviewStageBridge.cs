@@ -2,16 +2,9 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace EditorPlus.Preview
+namespace EditorPlus.AnimationPreview
 {
-    public interface IPreviewStageController
-    {
-        void Open(GameObject target);
-        void Close();
-        bool TryGetStageScene(out Scene scene);
-    }
-
-    public static class PreviewStageAPI
+    public static class AnimationPreviewStageBridge
     {
         public static IPreviewStageController Impl { get; set; }
 
