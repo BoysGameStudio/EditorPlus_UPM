@@ -7,10 +7,10 @@ using System;
 /// <summary>
 /// Put this attribute directly on an AnimationClip field to render a timeline under it.
 /// Example:
-/// [ShowActionTimeline(Height = 240)] public AnimationClip Animation;
+/// [TimelinePreview(Height = 240)] public AnimationClip Animation;
 /// </summary>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
-public sealed class ShowActionTimelineAttribute : Attribute
+public sealed class TimelinePreviewAttribute : Attribute
 {
     /// <summary>Timeline drawing height.</summary>
     public float Height { get; set; } = 260f;
@@ -20,7 +20,7 @@ public sealed class ShowActionTimelineAttribute : Attribute
 /// Mark any member as a track to be drawn on the timeline. Works on fields or properties.
 /// </summary>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
-public sealed class TimelineTrackAttribute : Attribute
+public sealed class TimelineTrackAttribute : Attribute // Rename to TimelineTrackInfoAttribute if you want even shorter
 {
     public string Label { get; }
     public string ColorHex { get; }

@@ -16,7 +16,7 @@ using EditorPlus.SceneTimeline;
 /// <summary>
 /// Field-level drawer that renders: 1) the AnimationClip field itself; 2) a timeline; 3) tracks discovered via [TimelineTrack].
 /// </summary>
-public sealed class ShowActionTimelineDrawer : OdinAttributeDrawer<ShowActionTimelineAttribute, AnimationClip>
+public sealed class ShowActionTimelineDrawer : OdinAttributeDrawer<TimelinePreviewAttribute, AnimationClip>
 {
     private const float TimelineLabelWidth = 180f;
     private const float TrackRowHeight = 24f;

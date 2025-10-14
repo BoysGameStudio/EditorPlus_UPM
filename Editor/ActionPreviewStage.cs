@@ -12,7 +12,7 @@ using EditorPlus.SceneTimeline;
 using EditorPlus.Preview;
 using UnityEngine.Rendering;
 
-public class ClipTimelinePreviewStage : PreviewSceneStage
+public class ActionPreviewStage : PreviewSceneStage
 {
     private const int MaxOutlineSlots = 16;
     private const string OutlineColorsProperty = "_OutlineColors";
@@ -847,7 +847,7 @@ public class ClipTimelinePreviewStage : PreviewSceneStage
         if (existingReceiver != null) return;
 
         // Add a default TimelineTrackPreviewBinder on the root so it can publish outline indices to globals
-        root.AddComponent<EditorPlus.SceneTimeline.TimelineTrackPreviewBinder>();
+        root.AddComponent<EditorPlus.SceneTimeline.TimelinePaletteBinder>();
     }
 
     private void ApplyDepthOnlyToPreviewRenderers(GameObject root)

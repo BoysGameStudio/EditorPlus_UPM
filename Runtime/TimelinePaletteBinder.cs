@@ -1,13 +1,14 @@
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
+
 using UnityEngine;
 
 namespace EditorPlus.SceneTimeline
 {
     [ExecuteAlways]
     [DisallowMultipleComponent]
-    public sealed class TimelineTrackPreviewBinder : MonoBehaviour, ITimelineTrackLayerPaletteReceiver
+    public sealed class TimelinePaletteBinder : MonoBehaviour, ITimelineTrackLayerPaletteReceiver
     {
         public enum VisualizationMode { OutlinePaletteIndex, MaterialColor }
         public enum ColorSource { Fill, Outline }

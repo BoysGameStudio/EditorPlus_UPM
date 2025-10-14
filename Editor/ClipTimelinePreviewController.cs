@@ -1,14 +1,16 @@
 #if UNITY_EDITOR
 using EditorPlus.Preview;
+
 using UnityEditor;
 using UnityEditor.SceneManagement;
+
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 [InitializeOnLoad]
 internal sealed class ClipTimelinePreviewController : IPreviewStageController
 {
-    private ClipTimelinePreviewStage _stage;
+    private ActionPreviewStage _stage;
 
     static ClipTimelinePreviewController()
     {
@@ -26,7 +28,7 @@ internal sealed class ClipTimelinePreviewController : IPreviewStageController
         // Close any existing stage we own to ensure a clean open
         Close();
 
-        _stage = ScriptableObject.CreateInstance<ClipTimelinePreviewStage>();
+        _stage = ScriptableObject.CreateInstance<ActionPreviewStage>();
         _stage.Target = target;
         StageUtility.GoToStage(_stage, true);
     }
