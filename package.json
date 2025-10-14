@@ -3,12 +3,15 @@
     "displayName": "Editor Plus",
     "version": "0.0.1",
     "unity": "2023.1",
-    "description": "",
+    "description": "Editor-only utilities for previewing and tooling (no runtime dependencies).",
     "author": {
-        "name": "Boys",
-        "url": ""
+        "name": "Boys"
     },
     "keywords": [
+        "editor",
+        "animation",
+        "preview",
+        "tools"
     ],
     "category": "Unity",
     "samples": [
