@@ -54,6 +54,12 @@ public sealed class ShowActionTimelineDrawer : OdinAttributeDrawer<ShowActionTim
         float? minHeightOverride = Attribute != null && Attribute.Height > 0f ? Attribute.Height : (float?)null;
         DrawTimeline(parentTarget, clip, minHeightOverride, includeFrameEventsInspector: true, addTopSpacing: true);
     }
+
+    [UnityEditor.InitializeOnLoadMethod]
+    private static void RegisterRuntimeAPI()
+    {
+        TimelineAPI.DrawTimelineHook = DrawTimeline;
+    }
     public static void DrawTimeline(UnityEngine.Object parentTarget, AnimationClip clip, float? minHeightOverride = null, bool includeFrameEventsInspector = true, bool addTopSpacing = true)
     {
         if (clip == null || parentTarget == null)
