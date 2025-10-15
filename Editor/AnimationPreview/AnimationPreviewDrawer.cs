@@ -16,20 +16,9 @@ using EditorPlus.AnimationPreview;
 /// <summary>
 /// Field-level drawer that renders: 1) the AnimationClip field itself; 2) a timeline; 3) tracks discovered via [TimelineTrack].
 /// </summary>
-public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPreviewAttribute, AnimationClip>
+public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPreviewAttribute, AnimationClip>
 {
-    private const float TimelineLabelWidth = 180f;
-    private const float TrackRowHeight = 24f;
-    private const float MarkerWidth = 5f;
-
-    // Per-parent target state (so multiple objects each have their own zoom/cursor, etc.)
-    private static readonly Dictionary<UnityEngine.Object, TimelineState> StateByTarget = new();
-    private static readonly Dictionary<int, WindowDragState> WindowBodyDragStates = new();
-    private static readonly Dictionary<Type, TrackMember[]> TrackMembersCache = new();
-
-    // Decoupled: we no longer reference ActiveActionData at compile time.
-    private static readonly object[] SeekPreviewArgs = new object[1];
-    private static readonly int TimelineSeekControlHint = "ShowActionTimelineSeekControl".GetHashCode();
+    // Shared constants and caches have been moved to TimelineContext for clarity.
 
 
     protected override void DrawPropertyLayout(GUIContent label)
@@ -73,10 +62,10 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         fps = ActiveActionIntegration.ResolvePreviewFPS(parentTarget, fps);
         var totalFrames = ComputeTotalFrames(length, fps);
 
-        if (!StateByTarget.TryGetValue(parentTarget, out var state))
+        if (!TimelineContext.StateByTarget.TryGetValue(parentTarget, out var state))
         {
             state = new TimelineState();
-            StateByTarget[parentTarget] = state;
+            TimelineContext.StateByTarget[parentTarget] = state;
         }
         state.Ensure(totalFrames);
 
@@ -87,7 +76,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
 
         GUILayout.BeginVertical(SirenixGUIStyles.BoxContainer);
         {
-            DrawToolbar(parentTarget, state, clip, fps, totalFrames, length);
+            ToolbarRenderer.DrawToolbar(parentTarget, state, clip, fps, totalFrames, length);
 
             var contentHeight = ComputeTimelineContentHeight(parentTarget);
             float baseMinHeight = minHeightOverride.HasValue ? Mathf.Max(0f, minHeightOverride.Value) : 80f;
@@ -97,12 +86,12 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
             var rulerRect = new Rect(rect.x, rect.y, rect.width, rulerH);
             var tracksRect = new Rect(rect.x, rect.y + rulerH, rect.width, rect.height - rulerH);
 
-            DrawRuler(rulerRect, state, fps, totalFrames);
-            DrawCursorLine(parentTarget, tracksRect, state, totalFrames);
+            RulerRenderer.DrawRuler(rulerRect, state, fps, totalFrames);
+            CursorRenderer.DrawCursorLine(parentTarget, tracksRect, state, totalFrames);
             state.VisibleRect = tracksRect;
 
-            DrawTracks(parentTarget, tracksRect, state, fps, totalFrames);
-            HandleZoomAndClick(parentTarget, rect, rulerRect, tracksRect, state, totalFrames);
+            TrackRenderer.DrawTracks(parentTarget, tracksRect, state, fps, totalFrames);
+            InputHandler.HandleZoomAndClick(parentTarget, rect, rulerRect, tracksRect, state, totalFrames);
         }
         GUILayout.EndVertical();
 
@@ -272,8 +261,8 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
     {
         EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.15f));
 
-        float rulerStartX = rect.x + TimelineLabelWidth; // Align with track content area
-        float rulerWidth = rect.width - TimelineLabelWidth;
+    float rulerStartX = rect.x + TimelineContext.TimelineLabelWidth; // Align with track content area
+    float rulerWidth = rect.width - TimelineContext.TimelineLabelWidth;
 
         float ppf = st.PixelsPerFrame;
         int step = 1;
@@ -319,15 +308,17 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
 
         frame = Mathf.Clamp(frame, 0, Mathf.Max(0, totalFrames - 1));
 
-        float contentWidth = tracksRect.width - TimelineLabelWidth;
+    float contentWidth = tracksRect.width - TimelineContext.TimelineLabelWidth;
         if (contentWidth <= 0f)
         {
             return;
         }
 
-        float x = tracksRect.x + TimelineLabelWidth + st.FrameToPixelX(frame);
+    float x = tracksRect.x + TimelineContext.TimelineLabelWidth + st.FrameToPixelX(frame);
         var lineRect = new Rect(x - 0.5f, tracksRect.y, 1.5f, tracksRect.height);
         EditorGUI.DrawRect(lineRect, new Color(1f, 0.85f, 0.2f, 0.9f));
+        // Render HitFrame preview visuals (if any) for the current frame
+        DrawHitFramesPreview(parentTarget, frame);
     }
 
     private static void HandleZoomAndClick(UnityEngine.Object parentTarget, Rect fullRect, Rect rulerRect, Rect tracksRect, TimelineState st, int totalFrames)
@@ -344,9 +335,9 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
             st.Zoom = Mathf.Clamp(st.Zoom * (1f + delta), 0.25f, 6f);
 
             float contentWidth = Mathf.Max(1f, st.WidthInPixels(totalFrames));
-            float mx = e.mousePosition.x - (tracksRect.x + TimelineLabelWidth);
+            float mx = e.mousePosition.x - (tracksRect.x + TimelineContext.TimelineLabelWidth);
             float norm = (mx + st.HScroll) / contentWidth;
-            float visibleWidth = Mathf.Max(0f, tracksRect.width - TimelineLabelWidth);
+            float visibleWidth = Mathf.Max(0f, tracksRect.width - TimelineContext.TimelineLabelWidth);
             float maxScroll = Mathf.Max(0f, contentWidth - visibleWidth);
             st.HScroll = Mathf.Clamp(norm * contentWidth - mx, 0f, maxScroll);
             e.Use();
@@ -354,10 +345,10 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         }
 
         // Use a control rect covering both ruler and tracks content horizontally (excluding left labels)
-        float timelineStart = tracksRect.x + TimelineLabelWidth;
+    float timelineStart = tracksRect.x + TimelineContext.TimelineLabelWidth;
         float timelineEnd = tracksRect.xMax;
         var controlRect = new Rect(timelineStart, rulerRect.yMin, Mathf.Max(0f, timelineEnd - timelineStart), rulerRect.height + tracksRect.height);
-        int controlId = GUIUtility.GetControlID(TimelineSeekControlHint, FocusType.Passive, controlRect);
+    int controlId = GUIUtility.GetControlID(TimelineContext.TimelineSeekControlHint, FocusType.Passive, controlRect);
         EventType typeForControl = e.GetTypeForControl(controlId);
         
         bool IsInTimelineContent(Vector2 mp)
@@ -417,53 +408,14 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         }
     }
 
-    private static int AlignTo(int v, int step) => (v % step == 0) ? v : (v + (step - (v % step)));
+    internal static int AlignTo(int v, int step) => (v % step == 0) ? v : (v + (step - (v % step)));
 
     // ---------------- Tracks ----------------
-    private struct TrackMember
-    {
-        public MemberInfo Member;
-        public string Label;
-        public Type ValueType;
-        public Color Color;
-        public Func<UnityEngine.Object, object> Getter;
-        public Action<UnityEngine.Object, object> Setter;
-        public int Order;
-    }
-
-    private readonly struct WindowBinding
-    {
-        public WindowBinding(int start, int end, Color color, string label, Func<UnityEngine.Object, int, int, bool> apply, int? rawStart = null, int? rawEnd = null)
-        {
-            if (apply == null) throw new ArgumentNullException(nameof(apply));
-
-            if (end < start)
-            {
-                (start, end) = (end, start);
-            }
-
-            StartFrame = start;
-            EndFrame = end;
-            Color = color;
-            Label = label ?? string.Empty;
-            Apply = apply;
-            RawStart = rawStart ?? start;
-            RawEnd = rawEnd ?? end;
-        }
-
-        public int StartFrame { get; }
-        public int EndFrame { get; }
-        public int RawStart { get; }
-        public int RawEnd { get; }
-        public Color Color { get; }
-        public string Label { get; }
-        public Func<UnityEngine.Object, int, int, bool> Apply { get; }
-    }
 
     private static void DrawTracks(UnityEngine.Object parentTarget, Rect tracksRect, TimelineState st, float fps, int totalFrames)
     {
         var members = GetTrackMembers(parentTarget);
-        float rowH = TrackRowHeight;
+    float rowH = TimelineContext.TrackRowHeight;
 
         float currentY = tracksRect.y;
 
@@ -475,17 +427,17 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
 
             EditorGUI.DrawRect(row, new Color(0, 0, 0, 0.05f));
 
-            var labelRect = new Rect(row.x + 6, row.y, TimelineLabelWidth - 6, row.height);
+            var labelRect = new Rect(row.x + 6, row.y, TimelineContext.TimelineLabelWidth - 6, row.height);
             GUI.Label(labelRect, tm.Label, SirenixGUIStyles.Label);
 
-            var content = new Rect(tracksRect.x + TimelineLabelWidth, row.y + 4, tracksRect.width - TimelineLabelWidth - 8, row.height - 8);
+            var content = new Rect(tracksRect.x + TimelineContext.TimelineLabelWidth, row.y + 4, tracksRect.width - TimelineContext.TimelineLabelWidth - 8, row.height - 8);
             DrawSingleTrack(parentTarget, tm, content, st, totalFrames);
         }
     }
 
     private static float ComputeTimelineContentHeight(UnityEngine.Object parentTarget)
     {
-        float tracksHeight = GetTrackMembers(parentTarget).Length * TrackRowHeight;
+    float tracksHeight = GetTrackMembers(parentTarget).Length * TimelineContext.TrackRowHeight;
 
         const float rulerHeight = 20f;
 
@@ -515,10 +467,10 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         }
 
         var type = target.GetType();
-        if (!TrackMembersCache.TryGetValue(type, out var cached))
+        if (!TimelineContext.TrackMembersCache.TryGetValue(type, out var cached))
         {
             cached = BuildTrackMembersForType(type);
-            TrackMembersCache[type] = cached;
+            TimelineContext.TrackMembersCache[type] = cached;
         }
 
         return cached;
@@ -617,7 +569,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         return result;
     }
 
-    private static Color DefaultColorFor(Type type)
+    internal static Color DefaultColorFor(Type type)
     {
         if (type == typeof(int)) return new Color(0.98f, 0.62f, 0.23f);
         if (type == typeof(int[])) return new Color(0.39f, 0.75f, 0.96f);
@@ -625,12 +577,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         return new Color(0.8f, 0.8f, 0.8f);
     }
 
-    private static Color ParseHexOrDefault(string hex, Color def)
-    {
-        if (string.IsNullOrWhiteSpace(hex)) return def;
-        if (ColorUtility.TryParseHtmlString(hex, out var c)) return c;
-        return def;
-    }
+    
 
     private static void DrawSingleTrack(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
     {
@@ -639,7 +586,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         if (tm.ValueType == typeof(int))
         {
             int val = (int)(tm.Getter?.Invoke(target) ?? 0);
-            DrawSingleMarker(target, tm, rect, st, val, tm.Color, MarkerWidth, ComputeControlSeed(target, tm), totalFrames, out _, out bool context, out int draggedFrame);
+            DrawSingleMarker(target, tm, rect, st, val, tm.Color, TimelineContext.MarkerWidth, TimelineContext.ComputeControlSeed(target, tm), totalFrames, out _, out bool context, out int draggedFrame);
 
             // Handle dragging to change value
             if (draggedFrame != val && tm.Setter != null)
@@ -658,7 +605,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
             var arr = (int[])(tm.Getter?.Invoke(target) ?? Array.Empty<int>());
             if (arr == null) arr = Array.Empty<int>();
 
-            var controlSeed = ComputeControlSeed(target, tm);
+            var controlSeed = TimelineContext.ComputeControlSeed(target, tm);
 
             if (arr.Length == 2)
             {
@@ -667,7 +614,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
             }
             else
             {
-                DrawMarkers(target, tm, rect, st, arr, tm.Color, MarkerWidth, controlSeed, totalFrames, out _, out bool context, out int draggedIndex, out int draggedFrame);
+                DrawMarkers(target, tm, rect, st, arr, tm.Color, TimelineContext.MarkerWidth, controlSeed, totalFrames, out _, out bool context, out int draggedIndex, out int draggedFrame);
 
                 // Handle dragging to change array element value
                 if (draggedIndex >= 0 && draggedIndex < arr.Length && draggedFrame != arr[draggedIndex] && tm.Setter != null)
@@ -690,7 +637,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
             if (windowInstance != null)
             {
                 var binding = CreateAffectWindowBinding(target, tm, windowInstance, totalFrames);
-                DrawWindowBinding(target, tm, rect, st, totalFrames, ComputeControlSeed(target, tm), binding);
+                DrawWindowBinding(target, tm, rect, st, totalFrames, TimelineContext.ComputeControlSeed(target, tm), binding);
 
                 var evt = Event.current;
                 if (evt.type == EventType.ContextClick && rect.Contains(evt.mousePosition))
@@ -710,7 +657,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
     }
 
     // ---------------- Drawing helpers ----------------
-    private static void DrawSingleMarker(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int frame, Color color, float width, int controlSeed, int totalFrames, out bool clicked, out bool context, out int draggedFrame)
+    internal static void DrawSingleMarker(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int frame, Color color, float width, int controlSeed, int totalFrames, out bool clicked, out bool context, out int draggedFrame)
     {
         clicked = false; context = false; draggedFrame = frame;
         float px = rect.x + st.FrameToPixelX(frame);
@@ -777,7 +724,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
     }
 
     /// <summary>clickedIndex: >=0 hit index; -1 none; -2 clicked empty.</summary>
-    private static void DrawMarkers(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int[] frames, Color color, float width, int controlSeedBase, int totalFrames, out int clickedIndex, out bool context, out int draggedIndex, out int draggedFrame)
+    internal static void DrawMarkers(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int[] frames, Color color, float width, int controlSeedBase, int totalFrames, out int clickedIndex, out bool context, out int draggedIndex, out int draggedFrame)
     {
         clickedIndex = -1; context = false; draggedIndex = -1; draggedFrame = -1;
 
@@ -785,7 +732,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         {
             float px = rect.x + st.FrameToPixelX(frames[i]);
             var r = new Rect(px - width * 0.5f, rect.y + 3, width, rect.height - 6);
-            int controlId = GUIUtility.GetControlID(CombineControlSeed(controlSeedBase, i), FocusType.Passive, r);
+            int controlId = GUIUtility.GetControlID(TimelineContext.CombineControlSeed(controlSeedBase, i), FocusType.Passive, r);
             var e = Event.current;
             var type = e.GetTypeForControl(controlId);
 
@@ -870,7 +817,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         }
     }
 
-    private static void DrawWindow(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int startFrame, int endFrame, Color color, string label, int controlSeedBase, int totalFrames, out int newStartFrame, out int newEndFrame, out bool dragged)
+    internal static void DrawWindow(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int startFrame, int endFrame, Color color, string label, int controlSeedBase, int totalFrames, out int newStartFrame, out int newEndFrame, out bool dragged)
     {
         newStartFrame = startFrame;
         newEndFrame = endFrame;
@@ -897,8 +844,8 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         }
 
         var e = Event.current;
-        int startControlId = GUIUtility.GetControlID(CombineControlSeed(controlSeedBase, 101), FocusType.Passive, startHandle);
-        int endControlId = GUIUtility.GetControlID(CombineControlSeed(controlSeedBase, 202), FocusType.Passive, endHandle);
+    int startControlId = GUIUtility.GetControlID(TimelineContext.CombineControlSeed(controlSeedBase, 101), FocusType.Passive, startHandle);
+    int endControlId = GUIUtility.GetControlID(TimelineContext.CombineControlSeed(controlSeedBase, 202), FocusType.Passive, endHandle);
         var startType = e.GetTypeForControl(startControlId);
         var endType = e.GetTypeForControl(endControlId);
 
@@ -980,7 +927,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         }
 
         // Body drag (move entire window)
-        int bodyControlId = GUIUtility.GetControlID(CombineControlSeed(controlSeedBase, 303), FocusType.Passive, r);
+    int bodyControlId = GUIUtility.GetControlID(TimelineContext.CombineControlSeed(controlSeedBase, 303), FocusType.Passive, r);
         var bodyType = e.GetTypeForControl(bodyControlId);
 
         switch (bodyType)
@@ -992,7 +939,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
                     {
                         Undo.RecordObject(target, $"Move {tm.Label} Window");
                     }
-                    WindowBodyDragStates[bodyControlId] = new WindowDragState
+                    TimelineContext.WindowBodyDragStates[bodyControlId] = new WindowDragState
                     {
                         StartFrame = startFrame,
                         EndFrame = endFrame,
@@ -1005,7 +952,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
                 break;
 
             case EventType.MouseDrag:
-                if (GUIUtility.hotControl == bodyControlId && e.button == 0 && WindowBodyDragStates.TryGetValue(bodyControlId, out var dragState))
+                if (GUIUtility.hotControl == bodyControlId && e.button == 0 && TimelineContext.WindowBodyDragStates.TryGetValue(bodyControlId, out var dragState))
                 {
                     float pixelDelta = e.mousePosition.x - dragState.MouseDownX;
                     int frameDelta = Mathf.RoundToInt(pixelDelta / Mathf.Max(1e-3f, st.PixelsPerFrame));
@@ -1028,7 +975,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
                 if (GUIUtility.hotControl == bodyControlId && e.button == 0)
                 {
                     GUIUtility.hotControl = 0;
-                    WindowBodyDragStates.Remove(bodyControlId);
+                    TimelineContext.WindowBodyDragStates.Remove(bodyControlId);
                     e.Use();
                 }
                 break;
@@ -1039,9 +986,9 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
                 break;
         }
 
-        if (bodyType == EventType.MouseUp && WindowBodyDragStates.ContainsKey(bodyControlId))
+        if (bodyType == EventType.MouseUp && TimelineContext.WindowBodyDragStates.ContainsKey(bodyControlId))
         {
-            WindowBodyDragStates.Remove(bodyControlId);
+            TimelineContext.WindowBodyDragStates.Remove(bodyControlId);
         }
 
         // border
@@ -1086,7 +1033,8 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         }
     }
 
-    private static void ShowReadOnlyContextMenu()
+
+    internal static void ShowReadOnlyContextMenu()
     {
         var menu = new GenericMenu();
         menu.AddDisabledItem(new GUIContent("Timeline editing is disabled"));
@@ -1128,7 +1076,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         return false;
     }
 
-    private static void DrawWindowBinding(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames, int controlSeed, WindowBinding binding)
+    internal static void DrawWindowBinding(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames, int controlSeed, WindowBinding binding)
     {
         int start = Mathf.Clamp(binding.StartFrame, 0, totalFrames);
         int end = Mathf.Clamp(binding.EndFrame, start, totalFrames);
@@ -1147,7 +1095,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         }
     }
 
-    private static WindowBinding CreateArrayWindowBinding(UnityEngine.Object target, TrackMember tm, int[] frames, int totalFrames)
+    internal static WindowBinding CreateArrayWindowBinding(UnityEngine.Object target, TrackMember tm, int[] frames, int totalFrames)
     {
         int rawStart = frames.Length > 0 ? frames[0] : 0;
         int rawEnd = frames.Length > 1 ? frames[1] : rawStart;
@@ -1174,7 +1122,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
             rawEnd);
     }
 
-    private static WindowBinding CreateAffectWindowBinding(UnityEngine.Object target, TrackMember tm, object window, int totalFrames)
+    internal static WindowBinding CreateAffectWindowBinding(UnityEngine.Object target, TrackMember tm, object window, int totalFrames)
     {
         int rawStart = TryGetIntMember(window, "IntraActionStartFrame", 0);
         int rawEnd = TryGetIntMember(window, "IntraActionEndFrame", rawStart);
@@ -1277,7 +1225,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         return fallback;
     }
 
-    private static bool HasAffectWindowPattern(Type t)
+    internal static bool HasAffectWindowPattern(Type t)
     {
         if (t == null) return false;
         var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
@@ -1292,119 +1240,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         return hasStart && hasEnd;
     }
 
-    private struct WindowDragState
-    {
-        public int StartFrame;
-        public int EndFrame;
-        public float MouseDownX;
-    }
-
-    private static class ActiveActionIntegration
-    {
-        public static bool HasPreview(UnityEngine.Object target)
-        {
-            return target is IAnimationPreviewHost host && host.HasActivePreview;
-        }
-
-        public static float ResolvePreviewFPS(UnityEngine.Object target, float fallback)
-        {
-            if (target is IAnimationPreviewHost host)
-            {
-                float v = host.ResolvePreviewFPS(fallback);
-                if (v > 0f) return v;
-            }
-            return fallback;
-        }
-
-        public static bool TryGetPreviewFrame(UnityEngine.Object target, out int frame)
-        {
-            frame = -1;
-            if (target is IAnimationPreviewHost host)
-            {
-                frame = host.GetPreviewFrame();
-                return frame >= 0;
-            }
-            return false;
-        }
-
-        public static void SeekPreviewFrame(UnityEngine.Object target, int frame)
-        {
-            if (target is IAnimationPreviewHost host)
-            {
-                host.SeekPreviewFrame(frame);
-            }
-        }
-
-        public static bool CanSeekPreview(UnityEngine.Object target)
-        {
-            return target is IAnimationPreviewHost;
-        }
-
-        public static void PausePreviewIfPlaying(UnityEngine.Object target)
-        {
-            if (target is IAnimationPreviewHost host && host.IsPreviewPlaying)
-            {
-                host.SetPreviewPlaying(false);
-            }
-        }
-
-        public static bool IsPreviewPlaying(UnityEngine.Object target)
-        {
-            return target is IAnimationPreviewHost host && host.IsPreviewPlaying;
-        }
-
-        public static void SetPlaying(UnityEngine.Object target, bool playing)
-        {
-            if (target is IAnimationPreviewHost host)
-            {
-                host.SetPreviewPlaying(playing);
-            }
-        }
-
-        public static bool TryEnsurePreviewInfrastructure(UnityEngine.Object target, bool resetTime)
-        {
-            return target is IAnimationPreviewHost host && host.EnsurePreviewInfrastructure(resetTime);
-        }
-
-        public static void TrySyncPlayerClip(UnityEngine.Object target, bool resetTime)
-        {
-            if (target is IAnimationPreviewHost host)
-            {
-                host.SyncPlayerClip(resetTime);
-            }
-        }
-    }
-
-    // ---------------- Timeline State ----------------
-    private sealed class TimelineState
-    {
-        public float Zoom = 1f;
-        public float HScroll = 0f;
-        public int CursorFrame = 0;
-        public Rect VisibleRect;
-        public bool IsSeeking = false;
-        public bool WasPlayingBeforeSeek = false;
-        private int _totalFrames;
-
-        public void Ensure(int totalFrames)
-        {
-            _totalFrames = totalFrames;
-            CursorFrame = Mathf.Clamp(CursorFrame, 0, Mathf.Max(0, totalFrames - 1));
-            HScroll = Mathf.Clamp(HScroll, 0, Mathf.Max(0, WidthInPixels(totalFrames) - VisibleRect.width));
-            // Do not forcibly clear IsSeeking here; keep transient state across repaints during drag
-        }
-
-        public float PixelsPerFrame => 6f * Zoom;
-        public float WidthInPixels(int frames) => frames * PixelsPerFrame;
-        public float FrameToPixelX(int frame) => frame * PixelsPerFrame - HScroll;
-        public int PixelToFrame(float localX, int totalFrames)
-        {
-            float pixelsPerFrame = Mathf.Max(0.0001f, PixelsPerFrame);
-            int maxFrame = Mathf.Max(0, totalFrames - 1);
-            int value = Mathf.RoundToInt((localX + HScroll) / pixelsPerFrame);
-            return Mathf.Clamp(value, 0, maxFrame);
-        }
-    }
+    // Window drag state, ActiveActionIntegration and TimelineState moved to partial files.
 
     private static void SeekTimelineToMouse(UnityEngine.Object parentTarget, TimelineState st, Rect tracksRect, int totalFrames, float mouseX)
     {
@@ -1413,7 +1249,7 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
             return;
         }
 
-        float localX = mouseX - (tracksRect.x + TimelineLabelWidth);
+    float localX = mouseX - (tracksRect.x + TimelineContext.TimelineLabelWidth);
         if (localX < 0f)
         {
             localX = 0f;
@@ -1440,5 +1276,170 @@ public sealed class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPrevie
         GUIHelper.RequestRepaint();
     }
 
+    // ---------------- HitFrame preview rendering (minimal) ----------------
+    private static void DrawHitFramesPreview(UnityEngine.Object parentTarget, int frame)
+    {
+        if (parentTarget == null) return;
+
+        try
+        {
+            if (Event.current.type != EventType.Repaint) return;
+
+            var so = new SerializedObject(parentTarget);
+            var prop = so.FindProperty("hitFrames");
+            if (prop == null) return;
+            for (int i = 0; i < prop.arraySize; i++)
+            {
+                var elem = prop.GetArrayElementAtIndex(i);
+                if (elem == null) continue;
+                var frameProp = elem.FindPropertyRelative("frame");
+                if (frameProp == null) continue;
+                if (frameProp.intValue != frame) continue;
+
+                // Try to find a shape property on the hitFrame element. If present, draw an approximate shape.
+                var shapeProp = elem.FindPropertyRelative("shape");
+                if (shapeProp != null && shapeProp.propertyType == SerializedPropertyType.Generic)
+                {
+                    DrawShape3DConfigPreview(shapeProp, parentTarget as GameObject);
+                }
+                else
+                {
+                    // Fallback: Draw a simple indicator at world origin as a safe, non-invasive preview.
+                    Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
+                    Handles.DrawWireDisc(Vector3.zero, Vector3.up, 0.5f);
+                    Handles.Label(Vector3.up * 0.6f, "HitFrame");
+                }
+
+                break;
+            }
+        }
+        catch { }
+    }
+
+    // Draw an approximate preview for a Shape3DConfig serialized property.
+    private static void DrawShape3DConfigPreview(SerializedProperty shapeProp, GameObject context)
+    {
+        try
+        {
+            // Expect fields: ShapeType (enum), PositionOffset (Vector3-like), RotationOffset (float or Quaternion-like), SphereRadius, BoxExtents, CapsuleRadius, CapsuleHeight
+            var shapeTypeProp = shapeProp.FindPropertyRelative("ShapeType");
+            if (shapeTypeProp == null) return;
+
+            // Determine shape type by enum index
+            int shapeType = shapeTypeProp.enumValueIndex;
+
+            // Position offset
+            Vector3 pos = Vector3.zero;
+            var posProp = shapeProp.FindPropertyRelative("PositionOffset");
+            if (posProp != null && posProp.propertyType == SerializedPropertyType.Vector3)
+            {
+                pos = posProp.vector3Value;
+            }
+
+            // Rotation offset (if present as Quaternion or Euler float)
+            Quaternion rot = Quaternion.identity;
+            var rotProp = shapeProp.FindPropertyRelative("RotationOffset");
+            if (rotProp != null)
+            {
+                if (rotProp.propertyType == SerializedPropertyType.Vector3)
+                {
+                    rot = Quaternion.Euler(rotProp.vector3Value);
+                }
+                else if (rotProp.propertyType == SerializedPropertyType.Quaternion)
+                {
+                    try { rot = rotProp.quaternionValue; } catch { rot = Quaternion.identity; }
+                }
+            }
+
+            // Transform local position to world using context if available
+            Vector3 worldPos = pos;
+            Quaternion worldRot = rot;
+            if (context != null)
+            {
+                var t = context.transform;
+                worldPos = t.TransformPoint(pos);
+                worldRot = t.rotation * rot;
+            }
+
+            Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
+
+            // 0=Unknown/None, 1=Sphere, 2=Box, 3=Capsule (approx mapping)
+            switch (shapeType)
+            {
+                case 1: // Sphere
+                {
+                    var radiusProp = shapeProp.FindPropertyRelative("SphereRadius");
+                    float r = 0.5f;
+                    if (radiusProp != null) r = Mathf.Max(0.001f, radiusProp.floatValue);
+                    Handles.DrawWireDisc(worldPos, worldRot * Vector3.up, r);
+                    Handles.DrawWireDisc(worldPos, worldRot * Vector3.right, r);
+                    Handles.DrawWireDisc(worldPos, worldRot * Vector3.forward, r);
+                    Handles.Label(worldPos + Vector3.up * (r + 0.1f), "HitFrame(Sphere)");
+                }
+                break;
+
+                case 2: // Box
+                {
+                    var extentsProp = shapeProp.FindPropertyRelative("BoxExtents");
+                    Vector3 ext = Vector3.one * 0.5f;
+                    if (extentsProp != null && extentsProp.propertyType == SerializedPropertyType.Vector3) ext = extentsProp.vector3Value;
+                    var verts = new Vector3[8];
+                    var half = ext;
+                    verts[0] = worldPos + worldRot * new Vector3(-half.x, -half.y, -half.z);
+                    verts[1] = worldPos + worldRot * new Vector3(half.x, -half.y, -half.z);
+                    verts[2] = worldPos + worldRot * new Vector3(half.x, -half.y, half.z);
+                    verts[3] = worldPos + worldRot * new Vector3(-half.x, -half.y, half.z);
+                    verts[4] = worldPos + worldRot * new Vector3(-half.x, half.y, -half.z);
+                    verts[5] = worldPos + worldRot * new Vector3(half.x, half.y, -half.z);
+                    verts[6] = worldPos + worldRot * new Vector3(half.x, half.y, half.z);
+                    verts[7] = worldPos + worldRot * new Vector3(-half.x, half.y, half.z);
+
+                    Handles.DrawLine(verts[0], verts[1]); Handles.DrawLine(verts[1], verts[2]); Handles.DrawLine(verts[2], verts[3]); Handles.DrawLine(verts[3], verts[0]);
+                    Handles.DrawLine(verts[4], verts[5]); Handles.DrawLine(verts[5], verts[6]); Handles.DrawLine(verts[6], verts[7]); Handles.DrawLine(verts[7], verts[4]);
+                    Handles.DrawLine(verts[0], verts[4]); Handles.DrawLine(verts[1], verts[5]); Handles.DrawLine(verts[2], verts[6]); Handles.DrawLine(verts[3], verts[7]);
+                    Handles.Label(worldPos + worldRot * Vector3.up * (half.y + 0.1f), "HitFrame(Box)");
+                }
+                break;
+
+                case 3: // Capsule (approx as two spheres + cylinder)
+                {
+                    var radiusProp = shapeProp.FindPropertyRelative("CapsuleRadius");
+                    var heightProp = shapeProp.FindPropertyRelative("CapsuleHeight");
+                    float radius = 0.25f; float height = 1f;
+                    if (radiusProp != null) radius = Mathf.Max(0.001f, radiusProp.floatValue);
+                    if (heightProp != null) height = Mathf.Max(0f, heightProp.floatValue);
+                    float half = Mathf.Max(0f, (height - 2f * radius) * 0.5f);
+                    Vector3 up = worldRot * Vector3.up;
+                    var top = worldPos + up * half;
+                    var bot = worldPos - up * half;
+                    Handles.DrawWireDisc(top, worldRot * Vector3.up, radius);
+                    Handles.DrawWireDisc(bot, worldRot * Vector3.up, radius);
+                    // draw simple connecting lines (approx cylinder)
+                    Handles.DrawLine(top + worldRot * Vector3.right * radius, bot + worldRot * Vector3.right * radius);
+                    Handles.DrawLine(top - worldRot * Vector3.right * radius, bot - worldRot * Vector3.right * radius);
+                    Handles.DrawLine(top + worldRot * Vector3.forward * radius, bot + worldRot * Vector3.forward * radius);
+                    Handles.DrawLine(top - worldRot * Vector3.forward * radius, bot - worldRot * Vector3.forward * radius);
+                    Handles.Label(worldPos + up * (half + radius + 0.05f), "HitFrame(Capsule)");
+                }
+                break;
+
+                default:
+                {
+                    // Unknown shape type — draw simple indicator
+                    Handles.DrawWireDisc(worldPos, Vector3.up, 0.5f);
+                    Handles.Label(worldPos + Vector3.up * 0.6f, "HitFrame");
+                }
+                break;
+            }
+        }
+        catch { }
+    }
+
+    internal static Color ParseHexOrDefault(string colorHex, Color color)
+    {
+        if (string.IsNullOrWhiteSpace(colorHex)) return color;
+        if (ColorUtility.TryParseHtmlString(colorHex, out var c)) return c;
+        return color;
+    }
 }
 #endif
