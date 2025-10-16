@@ -51,11 +51,7 @@ namespace EditorPlus.AnimationPreview
             if (!autoResolveRoot && overridePreviewRoot != null) root = overridePreviewRoot;
             else
             {
-                var mi = typeof(PreviewRenderer).GetMethod("ResolvePreviewRoot", BindingFlags.NonPublic | BindingFlags.Static);
-                if (mi != null)
-                {
-                    root = mi.Invoke(null, new object[] { selectedAsset }) as GameObject;
-                }
+                root = PreviewRenderer.ResolvePreviewRoot(selectedAsset);
             }
 
             Debug.Log($"Resolved preview root: {(root != null ? root.name : "<null>")}");
@@ -74,23 +70,13 @@ namespace EditorPlus.AnimationPreview
             if (!autoResolveRoot && overridePreviewRoot != null) root = overridePreviewRoot;
             else
             {
-                var mi = typeof(PreviewRenderer).GetMethod("ResolvePreviewRoot", BindingFlags.NonPublic | BindingFlags.Static);
-                if (mi != null)
-                {
-                    root = mi.Invoke(null, new object[] { selectedAsset }) as GameObject;
-                }
+                root = PreviewRenderer.ResolvePreviewRoot(selectedAsset);
             }
 
             // Call the same entrypoint used by the real preview
-            var drawMi = typeof(PreviewRenderer).GetMethod("DrawHitFramesPreview", BindingFlags.Public | BindingFlags.Static);
-            if (drawMi == null)
-            {
-                Debug.LogError("Can't find PreviewRenderer.DrawHitFramesPreview method.");
-                return;
-            }
-
+            PreviewRenderer.DrawHitFramesPreview(selectedAsset, frameIndex);
             // Force a SceneView repaint after invoking drawing — the preview renderer uses Handles which draw during OnGUI of SceneView.
-            drawMi.Invoke(null, new object[] { selectedAsset, frameIndex });
+            SceneView.RepaintAll();
             SceneView.RepaintAll();
         }
     }
