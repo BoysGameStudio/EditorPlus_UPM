@@ -24,7 +24,7 @@ namespace EditorPlus.AnimationPreview
             int end = Mathf.Min(totalFrames, st.PixelToFrame(rulerWidth, totalFrames) + 1);
 
             Handles.BeginGUI();
-            for (int f = AnimationPreviewDrawer.AlignTo(start, step); f <= end; f += step)
+            for (int f = AlignTo(start, step); f <= end; f += step)
             {
                 float x = rulerStartX + st.FrameToPixelX(f);
                 float h = (f % (step * 5) == 0) ? rect.height : rect.height * 0.6f;
@@ -39,6 +39,8 @@ namespace EditorPlus.AnimationPreview
             }
             Handles.EndGUI();
         }
+
+        private static int AlignTo(int v, int step) => (v % step == 0) ? v : (v + (step - (v % step)));
     }
 }
 #endif

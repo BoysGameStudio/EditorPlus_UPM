@@ -67,7 +67,14 @@ namespace EditorPlus.AnimationPreview
             }
             catch { }
 
-            var color = AnimationPreviewDrawer.ParseHexOrDefault(colorHex, AnimationPreviewDrawer.DefaultColorFor(valueType));
+            // Compute provider-local default color (moved from AnimationPreviewDrawer.DefaultColorFor)
+            Color defaultColor;
+            if (valueType == typeof(int)) defaultColor = new Color(0.98f, 0.62f, 0.23f);
+            else if (valueType == typeof(int[])) defaultColor = new Color(0.39f, 0.75f, 0.96f);
+            else if (AnimationPreviewDrawer.HasAffectWindowPattern(valueType)) defaultColor = new Color(0.5f, 0.9f, 0.5f);
+            else defaultColor = new Color(0.8f, 0.8f, 0.8f);
+
+            var color = AnimationPreviewDrawer.ParseHexOrDefault(colorHex, defaultColor);
 
             var trackMember = new TrackMember
             {

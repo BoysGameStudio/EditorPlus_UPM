@@ -203,257 +203,21 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
 #endif
     }
 
-    // ---------------- Toolbar ----------------
-    private static void DrawToolbar(UnityEngine.Object parentTarget, TimelineState st, AnimationClip clip, float fps, int frames, float length)
-    {
-        using (new GUILayout.HorizontalScope(EditorStyles.toolbar))
-        {
-            GUILayout.Label($"Clip: {clip.name}", GUILayout.Width(220));
-            GUILayout.Label($"Len: {length:0.###}s", GUILayout.Width(90));
-            GUILayout.Label($"FPS: {fps:0.##}", GUILayout.Width(80));
-            GUILayout.FlexibleSpace();
-
-            string frameInfo = "Frame: -";
-            bool hasPreview = ActiveActionIntegration.HasPreview(parentTarget);
-            if (frames > 0 && (hasPreview || st.IsSeeking))
-            {
-                // While scrubbing, prefer the local cursor for immediate feedback
-                int playbackFrame = st.IsSeeking
-                    ? st.CursorFrame
-                    : (ActiveActionIntegration.TryGetPreviewFrame(parentTarget, out var previewFrame) && previewFrame >= 0 ? previewFrame : st.CursorFrame);
-                int lastFrameIndex = Mathf.Max(0, frames - 1);
-                playbackFrame = Mathf.Clamp(playbackFrame, 0, lastFrameIndex);
-                float seconds = fps > 0f ? playbackFrame / Mathf.Max(1f, fps) : 0f;
-                frameInfo = lastFrameIndex > 0
-                    ? $"Frame: {playbackFrame} / {lastFrameIndex} ({seconds:0.###}s)"
-                    : $"Frame: {playbackFrame} ({seconds:0.###}s)";
-            }
-            GUILayout.Label(frameInfo, GUILayout.Width(200));
-
-            // DEBUG: show resolved owner type and discovered track count
-            try
-            {
-                var ownerType = parentTarget != null ? parentTarget.GetType().Name : "(null)";
-                var tracks = parentTarget != null ? GetTrackMembers(parentTarget).Length : 0;
-                GUILayout.Label($"Owner: {ownerType}  Tracks: {tracks}", GUILayout.Width(260));
-            }
-            catch { }
-
-            GUILayout.Label("Zoom", GUILayout.Width(40));
-            st.Zoom = GUILayout.HorizontalSlider(st.Zoom, 0.25f, 6f, GUILayout.Width(120));
-            st.Zoom = Mathf.Clamp(st.Zoom, 0.25f, 6f);
-
-            float typedZoom = EditorGUILayout.DelayedFloatField(st.Zoom, GUILayout.Width(60));
-            if (!Mathf.Approximately(typedZoom, st.Zoom))
-            {
-                st.Zoom = Mathf.Clamp(Mathf.Max(typedZoom, 0.001f), 0.25f, 6f);
-                GUIHelper.RequestRepaint();
-            }
-        }
-    }
-
-    // ---------------- Ruler & Cursor ----------------
-    private static void DrawRuler(Rect rect, TimelineState st, float fps, int totalFrames)
-    {
-        EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.15f));
-
-    float rulerStartX = rect.x + TimelineContext.TimelineLabelWidth; // Align with track content area
-    float rulerWidth = rect.width - TimelineContext.TimelineLabelWidth;
-
-        float ppf = st.PixelsPerFrame;
-        int step = 1;
-        if (ppf < 3) step = 5;
-        if (ppf < 1) step = 10;
-        if (ppf < 0.5f) step = 20;
-        if (ppf < 0.25f) step = 50;
-
-        int start = Mathf.Max(0, st.PixelToFrame(0, totalFrames));
-        int end = Mathf.Min(totalFrames, st.PixelToFrame(rulerWidth, totalFrames) + 1);
-
-        Handles.BeginGUI();
-        for (int f = AlignTo(start, step); f <= end; f += step)
-        {
-            float x = rulerStartX + st.FrameToPixelX(f);
-            float h = (f % (step * 5) == 0) ? rect.height : rect.height * 0.6f;
-            Handles.color = new Color(1, 1, 1, 0.2f);
-            Handles.DrawLine(new Vector3(x, rect.yMax, 0), new Vector3(x, rect.yMax - h, 0));
-            if (f % (step * 5) == 0)
-            {
-                var label = f.ToString();
-                var size = EditorStyles.miniLabel.CalcSize(new GUIContent(label));
-                GUI.Label(new Rect(x + 2, rect.yMax - size.y - 1, size.x, size.y), label, EditorStyles.miniLabel);
-            }
-        }
-        Handles.EndGUI();
-    }
-
-    private static void DrawCursorLine(UnityEngine.Object parentTarget, Rect tracksRect, TimelineState st, int totalFrames)
-    {
-        if (totalFrames <= 0) return;
-        bool hasPreview = ActiveActionIntegration.HasPreview(parentTarget);
-        // If preview isn't active, only draw while scrubbing so the user gets feedback
-        if (!hasPreview && !st.IsSeeking) return;
-
-        // Always draw a cursor: prefer live preview when available and not scrubbing
-        int frame = st.CursorFrame;
-        int previewFrame;
-        if (!st.IsSeeking && hasPreview && ActiveActionIntegration.TryGetPreviewFrame(parentTarget, out previewFrame))
-        {
-            frame = previewFrame;
-        }
-
-        frame = Mathf.Clamp(frame, 0, Mathf.Max(0, totalFrames - 1));
-
-    float contentWidth = tracksRect.width - TimelineContext.TimelineLabelWidth;
-        if (contentWidth <= 0f)
-        {
-            return;
-        }
-
-    float x = tracksRect.x + TimelineContext.TimelineLabelWidth + st.FrameToPixelX(frame);
-        var lineRect = new Rect(x - 0.5f, tracksRect.y, 1.5f, tracksRect.height);
-        EditorGUI.DrawRect(lineRect, new Color(1f, 0.85f, 0.2f, 0.9f));
-        // Render HitFrame preview visuals (if any) for the current frame
-        DrawHitFramesPreview(parentTarget, frame);
-    }
-
-    private static void HandleZoomAndClick(UnityEngine.Object parentTarget, Rect fullRect, Rect rulerRect, Rect tracksRect, TimelineState st, int totalFrames)
-    {
-        var e = Event.current;
-        if (e == null || e.type == EventType.Used)
-        {
-            return;
-        }
-
-        if (fullRect.Contains(e.mousePosition) && e.type == EventType.ScrollWheel)
-        {
-            float delta = -e.delta.y * 0.05f;
-            st.Zoom = Mathf.Clamp(st.Zoom * (1f + delta), 0.25f, 6f);
-
-            float contentWidth = Mathf.Max(1f, st.WidthInPixels(totalFrames));
-            float mx = e.mousePosition.x - (tracksRect.x + TimelineContext.TimelineLabelWidth);
-            float norm = (mx + st.HScroll) / contentWidth;
-            float visibleWidth = Mathf.Max(0f, tracksRect.width - TimelineContext.TimelineLabelWidth);
-            float maxScroll = Mathf.Max(0f, contentWidth - visibleWidth);
-            st.HScroll = Mathf.Clamp(norm * contentWidth - mx, 0f, maxScroll);
-            e.Use();
-            GUIHelper.RequestRepaint();
-        }
-
-        // Use a control rect covering both ruler and tracks content horizontally (excluding left labels)
-    float timelineStart = tracksRect.x + TimelineContext.TimelineLabelWidth;
-        float timelineEnd = tracksRect.xMax;
-        var controlRect = new Rect(timelineStart, rulerRect.yMin, Mathf.Max(0f, timelineEnd - timelineStart), rulerRect.height + tracksRect.height);
-    int controlId = GUIUtility.GetControlID(TimelineContext.TimelineSeekControlHint, FocusType.Passive, controlRect);
-        EventType typeForControl = e.GetTypeForControl(controlId);
-        
-        bool IsInTimelineContent(Vector2 mp)
-        {
-            if (mp.x < timelineStart || mp.x > timelineEnd) return false;
-            return rulerRect.Contains(mp) || tracksRect.Contains(mp);
-        }
-
-        switch (typeForControl)
-        {
-            case EventType.MouseDown:
-                if (e.button == 0 && GUIUtility.hotControl == 0 && IsInTimelineContent(e.mousePosition))
-                {
-                    GUIUtility.hotControl = controlId;
-                    GUIUtility.keyboardControl = controlId;
-                    // Try to ensure preview infra exists so scrubbing can drive the live preview
-                    if (ActiveActionIntegration.TryEnsurePreviewInfrastructure(parentTarget, resetTime: false))
-                    {
-                        // Bind the current clip if needed so seek has immediate effect
-                        ActiveActionIntegration.TrySyncPlayerClip(parentTarget, resetTime: false);
-                    }
-                    // Capture play-state and pause once at drag start so scrubbing won't fight the player
-                    st.WasPlayingBeforeSeek = ActiveActionIntegration.IsPreviewPlaying(parentTarget);
-                    ActiveActionIntegration.PausePreviewIfPlaying(parentTarget);
-                    st.IsSeeking = true;
-                    SeekTimelineToMouse(parentTarget, st, tracksRect, totalFrames, e.mousePosition.x);
-                    e.Use();
-                }
-                break;
-
-            case EventType.MouseDrag:
-                if (GUIUtility.hotControl == controlId)
-                {
-                    float clampedX = Mathf.Clamp(e.mousePosition.x, timelineStart, timelineEnd);
-                    SeekTimelineToMouse(parentTarget, st, tracksRect, totalFrames, clampedX);
-                    e.Use();
-                }
-                break;
-
-            case EventType.MouseUp:
-                if (GUIUtility.hotControl == controlId)
-                {
-                    float clampedX = Mathf.Clamp(e.mousePosition.x, timelineStart, timelineEnd);
-                    SeekTimelineToMouse(parentTarget, st, tracksRect, totalFrames, clampedX);
-                    GUIUtility.hotControl = 0;
-                    GUIUtility.keyboardControl = 0;
-                    st.IsSeeking = false;
-                    // Restore play-state if we were playing before scrubbing
-                    if (st.WasPlayingBeforeSeek)
-                    {
-                        ActiveActionIntegration.SetPlaying(parentTarget, true);
-                    }
-                    st.WasPlayingBeforeSeek = false;
-                    e.Use();
-                }
-                break;
-        }
-    }
-
-    internal static int AlignTo(int v, int step) => (v % step == 0) ? v : (v + (step - (v % step)));
-
-    // ---------------- Tracks ----------------
-
-    private static void DrawTracks(UnityEngine.Object parentTarget, Rect tracksRect, TimelineState st, float fps, int totalFrames)
-    {
-        var members = GetTrackMembers(parentTarget);
-    float rowH = TimelineContext.TrackRowHeight;
-
-        float currentY = tracksRect.y;
-
-        for (int i = 0; i < members.Length; i++)
-        {
-            var tm = members[i];
-            var row = new Rect(tracksRect.x, currentY, tracksRect.width, rowH);
-            currentY += rowH;
-
-            EditorGUI.DrawRect(row, new Color(0, 0, 0, 0.05f));
-
-            var labelRect = new Rect(row.x + 6, row.y, TimelineContext.TimelineLabelWidth - 6, row.height);
-            GUI.Label(labelRect, tm.Label, SirenixGUIStyles.Label);
-
-            var content = new Rect(tracksRect.x + TimelineContext.TimelineLabelWidth, row.y + 4, tracksRect.width - TimelineContext.TimelineLabelWidth - 8, row.height - 8);
-            DrawSingleTrack(parentTarget, tm, content, st, totalFrames);
-        }
-    }
+    // Toolbar, ruler, cursor and track iteration have been moved to dedicated renderers
+    // (ToolbarRenderer / RulerRenderer / CursorRenderer / TrackRenderer). The local
+    // implementations were left behind and are unused; they were removed to reduce
+    // duplication and maintenance surface.
 
     private static float ComputeTimelineContentHeight(UnityEngine.Object parentTarget)
     {
-    float tracksHeight = GetTrackMembers(parentTarget).Length * TimelineContext.TrackRowHeight;
+        float tracksHeight = GetTrackMembers(parentTarget).Length * TimelineContext.TrackRowHeight;
 
         const float rulerHeight = 20f;
 
         return rulerHeight + tracksHeight;
     }
 
-    private static Rect BuildMarkerRect(Rect rect, TimelineState st, int frame, float width)
-    {
-        float px = rect.x + st.FrameToPixelX(frame);
-        return new Rect(px - width * 0.5f, rect.y + 3f, width, rect.height - 6f);
-    }
-
-    private static Rect ExpandRect(Rect rect, float amount)
-    {
-        rect.xMin -= amount;
-        rect.xMax += amount;
-        rect.yMin -= amount;
-        rect.yMax += amount;
-        return rect;
-    }
+    // (BuildMarkerRect and ExpandRect were removed - unused helpers)
 
     private static TrackMember[] GetTrackMembers(UnityEngine.Object target)
     {
@@ -468,49 +232,13 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
 
     // Track discovery and caching is delegated to TrackRenderer.
 
-    internal static Color DefaultColorFor(Type type)
-    {
-        if (type == typeof(int)) return new Color(0.98f, 0.62f, 0.23f);
-        if (type == typeof(int[])) return new Color(0.39f, 0.75f, 0.96f);
-        if (HasAffectWindowPattern(type)) return new Color(0.5f, 0.9f, 0.5f);
-        return new Color(0.8f, 0.8f, 0.8f);
-    }
+    // Default color selection moved into providers so each provider can tune defaults
+    // for its specific value types.
 
-    
 
-    private static void DrawSingleTrack(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
-    {
-        // Delegate drawing to TrackRenderer which will call the provider that built the TrackMember.
-        // This keeps type-specific drawing logic inside providers.
-        try
-        {
-            // Try to find a registered provider that can draw this TrackMember.
-            var providers = TrackRenderer.GetRegisteredProviders();
-            if (providers != null)
-            {
-                foreach (var p in providers)
-                {
-                    try
-                    {
-                        if (p == null) continue;
-                        var ownerType = tm.Member?.DeclaringType ?? target?.GetType();
-                        if (ownerType == null) continue;
-                        if (!p.CanHandle(ownerType)) continue;
-                        if (p is TrackRenderer.ICustomTrackDrawer drawer)
-                        {
-                            drawer.Draw(target, tm, rect, st, totalFrames);
-                            return;
-                        }
-                    }
-                    catch { }
-                }
-            }
 
-            // Minimal background when no provider drew the member
-            EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.04f));
-        }
-        catch { }
-    }
+    // Per-track drawing logic is handled by registered providers (via TrackRenderer).
+    // This file no longer contains a local DrawSingleTrack fast-path.
 
     // ---------------- Drawing helpers ----------------
     internal static void DrawSingleMarker(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int frame, Color color, float width, int controlSeed, int totalFrames, out bool clicked, out bool context, out int draggedFrame)
@@ -713,8 +441,8 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         }
 
         var e = Event.current;
-    int startControlId = GUIUtility.GetControlID(TimelineContext.CombineControlSeed(controlSeedBase, 101), FocusType.Passive, startHandle);
-    int endControlId = GUIUtility.GetControlID(TimelineContext.CombineControlSeed(controlSeedBase, 202), FocusType.Passive, endHandle);
+        int startControlId = GUIUtility.GetControlID(TimelineContext.CombineControlSeed(controlSeedBase, 101), FocusType.Passive, startHandle);
+        int endControlId = GUIUtility.GetControlID(TimelineContext.CombineControlSeed(controlSeedBase, 202), FocusType.Passive, endHandle);
         var startType = e.GetTypeForControl(startControlId);
         var endType = e.GetTypeForControl(endControlId);
 
@@ -796,7 +524,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         }
 
         // Body drag (move entire window)
-    int bodyControlId = GUIUtility.GetControlID(TimelineContext.CombineControlSeed(controlSeedBase, 303), FocusType.Passive, r);
+        int bodyControlId = GUIUtility.GetControlID(TimelineContext.CombineControlSeed(controlSeedBase, 303), FocusType.Passive, r);
         var bodyType = e.GetTypeForControl(bodyControlId);
 
         switch (bodyType)
@@ -882,25 +610,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         }
     }
 
-    private static int ComputeControlSeed(UnityEngine.Object target, TrackMember tm, int index = -1)
-    {
-        unchecked
-        {
-            int hash = 17;
-            hash = hash * 31 + (target != null ? target.GetInstanceID() : 0);
-            hash = hash * 31 + (tm.Member?.MetadataToken ?? 0);
-            hash = hash * 31 + index;
-            return hash;
-        }
-    }
-
-    private static int CombineControlSeed(int seed, int index)
-    {
-        unchecked
-        {
-            return seed * 397 ^ index;
-        }
-    }
+    // ComputeControlSeed and CombineControlSeed are provided by TimelineContext; duplicates removed here.
 
 
     internal static void ShowReadOnlyContextMenu()
@@ -1093,171 +803,12 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
 
     // Window drag state, ActiveActionIntegration and TimelineState moved to partial files.
 
-    private static void SeekTimelineToMouse(UnityEngine.Object parentTarget, TimelineState st, Rect tracksRect, int totalFrames, float mouseX)
-    {
-        if (totalFrames <= 0)
-        {
-            return;
-        }
-
-    float localX = mouseX - (tracksRect.x + TimelineContext.TimelineLabelWidth);
-        if (localX < 0f)
-        {
-            localX = 0f;
-        }
-
-        int frame = st.PixelToFrame(localX, totalFrames);
-
-    // If a preview player exists or the object supports seeking, drive it; otherwise just keep the UI in sync
-    bool hasPreview = ActiveActionIntegration.HasPreview(parentTarget);
-    bool canSeek = hasPreview || ActiveActionIntegration.CanSeekPreview(parentTarget);
-
-        // Update local cursor so the UI always reflects user input
-        if (st.CursorFrame != frame) st.CursorFrame = frame;
-
-        if (canSeek)
-        {
-            ActiveActionIntegration.SeekPreviewFrame(parentTarget, frame);
-            // Force scene update for immediate visual feedback while scrubbing
-            EditorApplication.QueuePlayerLoopUpdate();
-            SceneView.RepaintAll();
-            // Also try repainting GameView to ensure overlay updates there too
-            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
-        }
-        GUIHelper.RequestRepaint();
-    }
-
-    // ---------------- HitFrame preview rendering ----------------
-    // Delegates to PreviewRenderer to centralize preview drawing logic.
-    private static void DrawHitFramesPreview(UnityEngine.Object parentTarget, int frame)
-    {
-        if (parentTarget == null) return;
-        if (Event.current?.type != EventType.Repaint) return;
-        try
-        {
-            PreviewRenderer.DrawHitFramesPreview(parentTarget, frame);
-        }
-        catch { }
-    }
+    // Seeking and cursor logic now lives in CursorRenderer / InputHandler; hitframe
+    // preview drawing is provided directly by PreviewRenderer. Local wrappers were
+    // removed.
 
     // Draw an approximate preview for a Shape3DConfig serialized property.
-    private static void DrawShape3DConfigPreview(SerializedProperty shapeProp, GameObject context)
-    {
-        try
-        {
-            // Expect fields: ShapeType (enum), PositionOffset (Vector3-like), RotationOffset (float or Quaternion-like), SphereRadius, BoxExtents, CapsuleRadius, CapsuleHeight
-            var shapeTypeProp = shapeProp.FindPropertyRelative("ShapeType");
-            if (shapeTypeProp == null) return;
-
-            // Determine shape type by enum index
-            int shapeType = shapeTypeProp.enumValueIndex;
-
-            // Position offset
-            Vector3 pos = Vector3.zero;
-            var posProp = shapeProp.FindPropertyRelative("PositionOffset");
-            if (posProp != null && posProp.propertyType == SerializedPropertyType.Vector3)
-            {
-                pos = posProp.vector3Value;
-            }
-
-            // Rotation offset (if present as Quaternion or Euler float)
-            Quaternion rot = Quaternion.identity;
-            var rotProp = shapeProp.FindPropertyRelative("RotationOffset");
-            if (rotProp != null)
-            {
-                if (rotProp.propertyType == SerializedPropertyType.Vector3)
-                {
-                    rot = Quaternion.Euler(rotProp.vector3Value);
-                }
-                else if (rotProp.propertyType == SerializedPropertyType.Quaternion)
-                {
-                    try { rot = rotProp.quaternionValue; } catch { rot = Quaternion.identity; }
-                }
-            }
-
-            // Transform local position to world using context if available
-            Vector3 worldPos = pos;
-            Quaternion worldRot = rot;
-            if (context != null)
-            {
-                var t = context.transform;
-                worldPos = t.TransformPoint(pos);
-                worldRot = t.rotation * rot;
-            }
-
-            Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
-
-            // 0=Unknown/None, 1=Sphere, 2=Box, 3=Capsule (approx mapping)
-            switch (shapeType)
-            {
-                case 1: // Sphere
-                {
-                    var radiusProp = shapeProp.FindPropertyRelative("SphereRadius");
-                    float r = 0.5f;
-                    if (radiusProp != null) r = Mathf.Max(0.001f, radiusProp.floatValue);
-                    Handles.DrawWireDisc(worldPos, worldRot * Vector3.up, r);
-                    Handles.DrawWireDisc(worldPos, worldRot * Vector3.right, r);
-                    Handles.DrawWireDisc(worldPos, worldRot * Vector3.forward, r);
-                    Handles.Label(worldPos + Vector3.up * (r + 0.1f), "HitFrame(Sphere)");
-                }
-                break;
-
-                case 2: // Box
-                {
-                    var extentsProp = shapeProp.FindPropertyRelative("BoxExtents");
-                    Vector3 ext = Vector3.one * 0.5f;
-                    if (extentsProp != null && extentsProp.propertyType == SerializedPropertyType.Vector3) ext = extentsProp.vector3Value;
-                    var verts = new Vector3[8];
-                    var half = ext;
-                    verts[0] = worldPos + worldRot * new Vector3(-half.x, -half.y, -half.z);
-                    verts[1] = worldPos + worldRot * new Vector3(half.x, -half.y, -half.z);
-                    verts[2] = worldPos + worldRot * new Vector3(half.x, -half.y, half.z);
-                    verts[3] = worldPos + worldRot * new Vector3(-half.x, -half.y, half.z);
-                    verts[4] = worldPos + worldRot * new Vector3(-half.x, half.y, -half.z);
-                    verts[5] = worldPos + worldRot * new Vector3(half.x, half.y, -half.z);
-                    verts[6] = worldPos + worldRot * new Vector3(half.x, half.y, half.z);
-                    verts[7] = worldPos + worldRot * new Vector3(-half.x, half.y, half.z);
-
-                    Handles.DrawLine(verts[0], verts[1]); Handles.DrawLine(verts[1], verts[2]); Handles.DrawLine(verts[2], verts[3]); Handles.DrawLine(verts[3], verts[0]);
-                    Handles.DrawLine(verts[4], verts[5]); Handles.DrawLine(verts[5], verts[6]); Handles.DrawLine(verts[6], verts[7]); Handles.DrawLine(verts[7], verts[4]);
-                    Handles.DrawLine(verts[0], verts[4]); Handles.DrawLine(verts[1], verts[5]); Handles.DrawLine(verts[2], verts[6]); Handles.DrawLine(verts[3], verts[7]);
-                    Handles.Label(worldPos + worldRot * Vector3.up * (half.y + 0.1f), "HitFrame(Box)");
-                }
-                break;
-
-                case 3: // Capsule (approx as two spheres + cylinder)
-                {
-                    var radiusProp = shapeProp.FindPropertyRelative("CapsuleRadius");
-                    var heightProp = shapeProp.FindPropertyRelative("CapsuleHeight");
-                    float radius = 0.25f; float height = 1f;
-                    if (radiusProp != null) radius = Mathf.Max(0.001f, radiusProp.floatValue);
-                    if (heightProp != null) height = Mathf.Max(0f, heightProp.floatValue);
-                    float half = Mathf.Max(0f, (height - 2f * radius) * 0.5f);
-                    Vector3 up = worldRot * Vector3.up;
-                    var top = worldPos + up * half;
-                    var bot = worldPos - up * half;
-                    Handles.DrawWireDisc(top, worldRot * Vector3.up, radius);
-                    Handles.DrawWireDisc(bot, worldRot * Vector3.up, radius);
-                    // draw simple connecting lines (approx cylinder)
-                    Handles.DrawLine(top + worldRot * Vector3.right * radius, bot + worldRot * Vector3.right * radius);
-                    Handles.DrawLine(top - worldRot * Vector3.right * radius, bot - worldRot * Vector3.right * radius);
-                    Handles.DrawLine(top + worldRot * Vector3.forward * radius, bot + worldRot * Vector3.forward * radius);
-                    Handles.DrawLine(top - worldRot * Vector3.forward * radius, bot - worldRot * Vector3.forward * radius);
-                    Handles.Label(worldPos + up * (half + radius + 0.05f), "HitFrame(Capsule)");
-                }
-                break;
-
-                default:
-                {
-                    // Unknown shape type — draw simple indicator
-                    Handles.DrawWireDisc(worldPos, Vector3.up, 0.5f);
-                    Handles.Label(worldPos + Vector3.up * 0.6f, "HitFrame");
-                }
-                break;
-            }
-        }
-        catch { }
-    }
+    // DrawShape3DConfigPreview removed - PreviewRenderer provides centralized implementations.
 
     internal static Color ParseHexOrDefault(string colorHex, Color color)
     {
