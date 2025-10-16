@@ -200,7 +200,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         {
             try
             {
-                // Prefer known Quantum asset types directly (typed-first, no string/reflection)
+                // Typed-first: known Quantum asset types
                 try
                 {
                     if (c is Quantum.AttackActionData || c is Quantum.ActiveActionData)
@@ -208,28 +208,11 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
                         return c;
                     }
                 }
-                catch { /* Quantum types may not always be present; fall through to reflection */ }
+                catch { }
 
-                var t = c.GetType();
-                var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
-                // If the type declares a member named 'hitFrames', prefer it
-                if (t.GetField("hitFrames", flags) != null || t.GetProperty("hitFrames", flags) != null)
-                {
-                    return c;
-                }
-
-                // Otherwise, prefer any member annotated with AnimationEventAttribute
-                foreach (var m in t.GetMembers(flags))
-                {
-                    try
-                    {
-                        if (m.GetCustomAttribute<AnimationEventAttribute>() != null)
-                        {
-                            return c;
-                        }
-                    }
-                    catch { }
-                }
+                // Use TrackRenderer which has typed-first discovery for known types and a reflection fallback for unknowns.
+                var tracks = TrackRenderer.GetTrackMembers(c);
+                if (tracks != null && tracks.Length > 0) return c;
             }
             catch { }
         }
@@ -514,108 +497,11 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
             return Array.Empty<TrackMember>();
         }
 
-        var type = target.GetType();
-        if (!TimelineContext.TrackMembersCache.TryGetValue(type, out var cached))
-        {
-            cached = BuildTrackMembersForType(type);
-            TimelineContext.TrackMembersCache[type] = cached;
-        }
-
-        return cached;
+        // Delegate to TrackRenderer which handles typed-first discovery and caching.
+        return TrackRenderer.GetTrackMembers(target);
     }
 
-    private static TrackMember[] BuildTrackMembersForType(Type type)
-    {
-        var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-        var members = type.GetMembers(flags);
-        var entries = new List<(TrackMember Track, int DeclarationIndex)>(members.Length);
-        int declarationIndex = 0;
-
-        foreach (var member in members)
-        {
-            var attribute = member.GetCustomAttribute<AnimationEventAttribute>();
-            if (attribute == null)
-            {
-                continue;
-            }
-
-            Type valueType;
-            Func<UnityEngine.Object, object> getter = null;
-            Action<UnityEngine.Object, object> setter = null;
-
-            if (member is FieldInfo field)
-            {
-                valueType = field.FieldType;
-                getter = owner => field.GetValue(owner);
-                if (!field.IsInitOnly)
-                {
-                    setter = (owner, value) => field.SetValue(owner, value);
-                }
-            }
-            else if (member is PropertyInfo property)
-            {
-                valueType = property.PropertyType;
-                if (property.CanRead)
-                {
-                    getter = owner => property.GetValue(owner, null);
-                }
-                if (property.CanWrite)
-                {
-                    setter = (owner, value) => property.SetValue(owner, value, null);
-                }
-            }
-            else
-            {
-                continue;
-            }
-
-            if (getter == null)
-            {
-                continue;
-            }
-
-            var label = string.IsNullOrEmpty(attribute.Label) ? member.Name : attribute.Label;
-            var color = ParseHexOrDefault(attribute.ColorHex, DefaultColorFor(valueType));
-
-            var trackMember = new TrackMember
-            {
-                Member = member,
-                Label = label,
-                ValueType = valueType,
-                Color = color,
-                Getter = getter,
-                Setter = setter,
-                Order = attribute.Order
-            };
-
-            entries.Add((trackMember, declarationIndex));
-            declarationIndex++;
-        }
-
-        if (entries.Count == 0)
-        {
-            return Array.Empty<TrackMember>();
-        }
-
-        entries.Sort((a, b) =>
-        {
-            int orderComparison = a.Track.Order.CompareTo(b.Track.Order);
-            if (orderComparison != 0)
-            {
-                return orderComparison;
-            }
-
-            return a.DeclarationIndex.CompareTo(b.DeclarationIndex);
-        });
-
-        var result = new TrackMember[entries.Count];
-        for (int i = 0; i < entries.Count; i++)
-        {
-            result[i] = entries[i].Track;
-        }
-
-        return result;
-    }
+    // Track discovery and caching is delegated to TrackRenderer.
 
     internal static Color DefaultColorFor(Type type)
     {
@@ -745,19 +631,12 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
                                         try { arrObj.SetValue(pp, mapped); } catch { }
                                         applied = true;
                                     }
-                                    else if (elem is Quantum.ChildActorFrame cc)
-                                    {
-                                        // ChildActorFrame.Frame is read-only; use the centralized setter which handles backing fields/reflection
-                                        try
+                                        else if (elem is Quantum.ChildActorFrame cc)
                                         {
-                                            if (EditorPlus.AnimationPreview.TimelineUtils.TrySetIntMember(elem, "frame", draggedFrame))
-                                            {
-                                                try { arrObj.SetValue(elem, mapped); } catch { }
-                                                applied = true;
-                                            }
+                                            // ChildActorFrame.Frame is read-only in the simulation types; do not attempt to mutate it here.
+                                            // Editing read-only simulation-frame structs would require reflection into Quantum types which is forbidden.
+                                            applied = false;
                                         }
-                                        catch { applied = false; }
-                                    }
                                 }
                                 catch { applied = false; }
 
@@ -1361,12 +1240,84 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
 
     private static bool TrySetIntMember(object instance, string memberName, int value)
     {
-        return EditorPlus.AnimationPreview.TimelineUtils.TrySetIntMember(instance, memberName, value);
+        if (instance == null || string.IsNullOrEmpty(memberName)) return false;
+        try
+        {
+            // SerializedProperty path (editor asset case)
+            if (instance is SerializedProperty sp)
+            {
+                var p = sp.FindPropertyRelative(memberName);
+                if (p != null)
+                {
+                    p.intValue = value;
+                    sp.serializedObject.ApplyModifiedProperties();
+                    return true;
+                }
+                return false;
+            }
+
+            // Typed Quantum structures
+            if (instance is Quantum.ActiveActionIFrames iFrames)
+            {
+                if (memberName.Equals("IntraActionStartFrame", StringComparison.OrdinalIgnoreCase)) { iFrames.IntraActionStartFrame = value; return true; }
+                if (memberName.Equals("IntraActionEndFrame", StringComparison.OrdinalIgnoreCase)) { iFrames.IntraActionEndFrame = value; return true; }
+            }
+
+            if (instance is Quantum.ActiveActionAffectWindow aw)
+            {
+                if (memberName.Equals("IntraActionStartFrame", StringComparison.OrdinalIgnoreCase)) { aw.IntraActionStartFrame = value; return true; }
+                if (memberName.Equals("IntraActionEndFrame", StringComparison.OrdinalIgnoreCase)) { aw.IntraActionEndFrame = value; return true; }
+            }
+
+            // Frame elements (boxed structs) - set only for mutable types
+            if (instance is Quantum.HitFrame hf)
+            {
+                hf.frame = value;
+                return true;
+            }
+            if (instance is Quantum.ProjectileFrame pf)
+            {
+                pf.frame = value;
+                return true;
+            }
+
+            // ChildActorFrame.Frame is read-only; do not attempt to set
+        }
+        catch { }
+        return false;
     }
 
     private static int TryGetIntMember(object instance, string memberName, int fallback)
     {
-        if (EditorPlus.AnimationPreview.TimelineUtils.TryGetIntMember(instance, memberName, out var v)) return v;
+        if (instance == null || string.IsNullOrEmpty(memberName)) return fallback;
+        try
+        {
+            if (instance is SerializedProperty sp)
+            {
+                var p = sp.FindPropertyRelative(memberName);
+                if (p != null) return p.intValue;
+                return fallback;
+            }
+
+            if (instance is Quantum.ActiveActionIFrames iFrames)
+            {
+                if (memberName.Equals("IntraActionStartFrame", StringComparison.OrdinalIgnoreCase)) return iFrames.IntraActionStartFrame;
+                if (memberName.Equals("IntraActionEndFrame", StringComparison.OrdinalIgnoreCase)) return iFrames.IntraActionEndFrame;
+                return fallback;
+            }
+
+            if (instance is Quantum.ActiveActionAffectWindow aw)
+            {
+                if (memberName.Equals("IntraActionStartFrame", StringComparison.OrdinalIgnoreCase)) return aw.IntraActionStartFrame;
+                if (memberName.Equals("IntraActionEndFrame", StringComparison.OrdinalIgnoreCase)) return aw.IntraActionEndFrame;
+                return fallback;
+            }
+
+            if (instance is Quantum.HitFrame hf) return hf.frame;
+            if (instance is Quantum.ProjectileFrame pf) return pf.frame;
+            if (instance is Quantum.ChildActorFrame caf) return caf.Frame;
+        }
+        catch { }
         return fallback;
     }
 
@@ -1634,6 +1585,8 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         return Array.Empty<int>();
     }
 
+    // Local typed-only fast path to read 'frame' from known Quantum frame types.
+    // This intentionally avoids reflection and only supports the in-repo known frame structs.
     private static bool TryGetIntFieldOrPropLocal(object instance, string name, out int value)
     {
         value = -1;
@@ -1646,27 +1599,6 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         }
         catch { }
 
-        try
-        {
-            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
-            var f = instance.GetType().GetField(name, flags);
-            if (f != null)
-            {
-                var v = f.GetValue(instance);
-                if (v == null) return false;
-                value = Convert.ToInt32(v);
-                return true;
-            }
-            var p = instance.GetType().GetProperty(name, flags);
-            if (p != null)
-            {
-                var v = p.GetValue(instance, null);
-                if (v == null) return false;
-                value = Convert.ToInt32(v);
-                return true;
-            }
-        }
-        catch { }
         return false;
     }
 }

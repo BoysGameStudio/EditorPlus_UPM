@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 using UnityEditor;
+using Quantum;
 using Sirenix.Utilities.Editor;
 
 namespace EditorPlus.AnimationPreview
@@ -31,6 +32,8 @@ namespace EditorPlus.AnimationPreview
                 var content = new Rect(tracksRect.x + TimelineContext.TimelineLabelWidth, row.y + 4, tracksRect.width - TimelineContext.TimelineLabelWidth - 8, row.height - 8);
                 DrawSingleTrack(parentTarget, tm, content, st, totalFrames);
             }
+
+            
         }
 
         public static TrackMember[] GetTrackMembers(UnityEngine.Object target)
@@ -53,7 +56,7 @@ namespace EditorPlus.AnimationPreview
             if (type == null) return null;
 
             // ActiveActionData explicit mapping
-            if (type.FullName == "Quantum.ActiveActionData" || type.Name == "ActiveActionData")
+            if (type == typeof(ActiveActionData) || typeof(ActiveActionData).IsAssignableFrom(type))
             {
                 // Build explicit TrackMember array matching the AnimationEventAttribute annotations in source.
                 var list = new List<TrackMember>();
@@ -152,8 +155,8 @@ namespace EditorPlus.AnimationPreview
                 {
                     Member = null,
                     Label = "I-Frames",
-                    ValueType = typeof(object),
-                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#82E0AA", AnimationPreviewDrawer.DefaultColorFor(typeof(object))),
+                    ValueType = typeof(ActiveActionIFrames),
+                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#82E0AA", AnimationPreviewDrawer.DefaultColorFor(typeof(ActiveActionIFrames))),
                     Getter = owner => {
                         var asObj = owner as UnityEngine.Object;
                         if (asObj == null) return null;
@@ -171,8 +174,8 @@ namespace EditorPlus.AnimationPreview
                 {
                     Member = null,
                     Label = "Affect Window",
-                    ValueType = typeof(object),
-                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#F5B041", AnimationPreviewDrawer.DefaultColorFor(typeof(object))),
+                    ValueType = typeof(ActiveActionAffectWindow),
+                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#F5B041", AnimationPreviewDrawer.DefaultColorFor(typeof(ActiveActionAffectWindow))),
                     Getter = owner => {
                         var asObj = owner as UnityEngine.Object;
                         if (asObj == null) return null;
@@ -189,7 +192,7 @@ namespace EditorPlus.AnimationPreview
             }
 
             // PlayerDashActionData: Dash End Frame
-            if (type.FullName == "Quantum.PlayerDashActionData" || type.Name == "PlayerDashActionData")
+            if (type == typeof(PlayerDashActionData) || typeof(PlayerDashActionData).IsAssignableFrom(type))
             {
                 var member = new TrackMember
                 {
@@ -216,6 +219,72 @@ namespace EditorPlus.AnimationPreview
                     Order = -1
                 };
                 return new[] { member };
+            }
+
+            // AttackActionData typed mapping (no string-based type/member checks)
+            if (type == typeof(AttackActionData) || typeof(AttackActionData).IsAssignableFrom(type))
+            {
+                var list = new List<TrackMember>();
+
+                list.Add(new TrackMember
+                {
+                    Member = null,
+                    Label = "Hit Frames",
+                    ValueType = typeof(HitFrame[]),
+                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#FF5555", AnimationPreviewDrawer.DefaultColorFor(typeof(HitFrame[]))),
+                    Getter = owner => {
+                        if (owner is AttackActionData attack) return attack.hitFrames;
+                        // also accept UnityEngine.Object that wraps a ScriptableObject instance
+                        if (owner is UnityEngine.Object uo)
+                        {
+                            var inst = uo as AttackActionData;
+                            if (inst != null) return inst.hitFrames;
+                        }
+                        return null;
+                    },
+                    Setter = null,
+                    Order = 100
+                });
+
+                list.Add(new TrackMember
+                {
+                    Member = null,
+                    Label = "Projectile Frames",
+                    ValueType = typeof(ProjectileFrame[]),
+                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#FFAA55", AnimationPreviewDrawer.DefaultColorFor(typeof(ProjectileFrame[]))),
+                    Getter = owner => {
+                        if (owner is AttackActionData attack) return attack.projectileFrames;
+                        if (owner is UnityEngine.Object uo)
+                        {
+                            var inst = uo as AttackActionData;
+                            if (inst != null) return inst.projectileFrames;
+                        }
+                        return null;
+                    },
+                    Setter = null,
+                    Order = 101
+                });
+
+                list.Add(new TrackMember
+                {
+                    Member = null,
+                    Label = "Child Actor Frames",
+                    ValueType = typeof(ChildActorFrame[]),
+                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#FF77CC", AnimationPreviewDrawer.DefaultColorFor(typeof(ChildActorFrame[]))),
+                    Getter = owner => {
+                        if (owner is AttackActionData attack) return attack.childActorFrames;
+                        if (owner is UnityEngine.Object uo)
+                        {
+                            var inst = uo as AttackActionData;
+                            if (inst != null) return inst.childActorFrames;
+                        }
+                        return null;
+                    },
+                    Setter = null,
+                    Order = 102
+                });
+
+                return list.ToArray();
             }
 
             return null;
