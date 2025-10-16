@@ -18,12 +18,10 @@ using EditorPlus.AnimationPreview;
 /// </summary>
 public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<AnimationPreviewAttribute, AnimationClip>
 {
-    // Shared constants and caches have been moved to TimelineContext for clarity.
-
 
     protected override void DrawPropertyLayout(GUIContent label)
     {
-        // 1) Draw the clip field as usual
+
         this.CallNextDrawer(label);
 
         var clip = this.ValueEntry.SmartValue;
@@ -56,7 +54,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
             return;
         }
 
-        // Compute a robust end time from curves and events to avoid off-by-one due to floating errors
+
         var length = GetEffectiveClipEndTime(clip);
         var fps = ResolveClipFPS(clip);
         fps = ActiveActionIntegration.ResolvePreviewFPS(parentTarget, fps);
@@ -98,7 +96,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         _ = includeFrameEventsInspector; // retained for signature compatibility
     }
 
-    // Derive the effective end time using curves and events to match the true authored range
+
     private static float GetEffectiveClipEndTime(AnimationClip clip)
     {
         if (clip == null) return 0f;
@@ -191,7 +189,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         return candidates.Count > 0 ? candidates[0] : null;
     }
 
-    // ---------------- FPS helper ----------------
+
     private static float ResolveClipFPS(AnimationClip clip)
     {
 #if UNITY_2021_2_OR_NEWER
@@ -203,10 +201,6 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
 #endif
     }
 
-    // Toolbar, ruler, cursor and track iteration have been moved to dedicated renderers
-    // (ToolbarRenderer / RulerRenderer / CursorRenderer / TrackRenderer). The local
-    // implementations were left behind and are unused; they were removed to reduce
-    // duplication and maintenance surface.
 
     private static float ComputeTimelineContentHeight(UnityEngine.Object parentTarget)
     {
@@ -217,7 +211,6 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         return rulerHeight + tracksHeight;
     }
 
-    // (BuildMarkerRect and ExpandRect were removed - unused helpers)
 
     private static TrackMember[] GetTrackMembers(UnityEngine.Object target)
     {
@@ -230,17 +223,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         return TrackRenderer.GetTrackMembers(target);
     }
 
-    // Track discovery and caching is delegated to TrackRenderer.
 
-    // Default color selection moved into providers so each provider can tune defaults
-    // for its specific value types.
-
-
-
-    // Per-track drawing logic is handled by registered providers (via TrackRenderer).
-    // This file no longer contains a local DrawSingleTrack fast-path.
-
-    // ---------------- Drawing helpers ----------------
     internal static void DrawSingleMarker(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int frame, Color color, float width, int controlSeed, int totalFrames, out bool clicked, out bool context, out int draggedFrame)
     {
         clicked = false; context = false; draggedFrame = frame;
@@ -250,7 +233,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         var e = Event.current;
         var type = e.GetTypeForControl(controlId);
 
-        if (Event.current.type == EventType.Repaint)
+        if (e.type == EventType.Repaint)
         {
             EditorGUI.DrawRect(r, color);
         }
@@ -262,10 +245,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
             case EventType.MouseDown:
                 if (e.button == 0 && r.Contains(e.mousePosition))
                 {
-                    if (target != null)
-                    {
-                        Undo.RecordObject(target, $"Move {tm.Label} Marker");
-                    }
+                    RecordUndo(target, $"Move {tm.Label} Marker");
                     clicked = true;
                     GUIUtility.hotControl = controlId;
                     GUIUtility.keyboardControl = controlId;
@@ -307,7 +287,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         }
     }
 
-    /// <summary>clickedIndex: >=0 hit index; -1 none; -2 clicked empty.</summary>
+
     internal static void DrawMarkers(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int[] frames, Color color, float width, int controlSeedBase, int totalFrames, out int clickedIndex, out bool context, out int draggedIndex, out int draggedFrame)
     {
         clickedIndex = -1; context = false; draggedIndex = -1; draggedFrame = -1;
@@ -597,8 +577,6 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         }
     }
 
-    // ComputeControlSeed and CombineControlSeed are provided by TimelineContext; duplicates removed here.
-
 
     internal static void ShowReadOnlyContextMenu()
     {
@@ -607,7 +585,6 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         menu.ShowAsContext();
     }
 
-    // ApplyAffectWindowChanges was moved to IActionAffectWindowTrackProvider so the provider owns apply logic
 
     internal static void DrawWindowBinding(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames, int controlSeed, WindowBinding binding)
     {
@@ -628,44 +605,6 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         }
     }
 
-    internal static WindowBinding CreateArrayWindowBinding(UnityEngine.Object target, TrackMember tm, int[] frames, int totalFrames)
-    {
-        int rawStart = frames.Length > 0 ? frames[0] : 0;
-        int rawEnd = frames.Length > 1 ? frames[1] : rawStart;
-        int start = Mathf.Clamp(rawStart, 0, totalFrames);
-        int end = Mathf.Clamp(rawEnd, 0, totalFrames);
-
-        return new WindowBinding(
-            start,
-            end,
-            tm.Color,
-            string.Empty,
-            (owner, newStart, newEnd) =>
-            {
-                if (tm.Setter == null || frames.Length < 2) return false;
-                if (frames[0] == newStart && frames[1] == newEnd) return false;
-
-                var newArr = (int[])frames.Clone();
-                newArr[0] = newStart;
-                newArr[1] = newEnd;
-                tm.Setter(owner, newArr);
-                return true;
-            },
-            rawStart,
-            rawEnd);
-    }
-
-    // CreateAffectWindowBinding, ApplyAffectWindowChanges, TrySetIntMember and TryGetIntMember
-    // were moved to IActionAffectWindowTrackProvider so the provider owns all type-specific logic.
-
-    // Window drag state, ActiveActionIntegration and TimelineState moved to partial files.
-
-    // Seeking and cursor logic now lives in CursorRenderer / InputHandler; hitframe
-    // preview drawing is provided directly by PreviewRenderer. Local wrappers were
-    // removed.
-
-    // Draw an approximate preview for a Shape3DConfig serialized property.
-    // DrawShape3DConfigPreview removed - PreviewRenderer provides centralized implementations.
 
     internal static Color ParseHexOrDefault(string colorHex, Color color)
     {
@@ -674,8 +613,22 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         return color;
     }
 
-    // ReadFrameArrayLocal moved to FrameArrayTrackProvider - the provider owns POCO-frame extraction
+    // Helper: record an undo if target is available
+    private static void RecordUndo(UnityEngine.Object target, string label)
+    {
+        if (target == null) return;
+        Undo.RecordObject(target, label);
+    }
 
-    // Removed typed-only fast path helper. Reflection/SerializedProperty are used instead.
+    // Helper: draw simple 1px borders around a rect
+    private static void DrawRectBorders(Rect r)
+    {
+        EditorGUI.DrawRect(new Rect(r.x, r.y, r.width, 1), new Color(0, 0, 0, 0.5f));
+        EditorGUI.DrawRect(new Rect(r.x, r.yMax - 1, r.width, 1), new Color(0, 0, 0, 0.5f));
+        EditorGUI.DrawRect(new Rect(r.x, r.y, 1, r.height), new Color(0, 0, 0, 0.5f));
+        EditorGUI.DrawRect(new Rect(r.xMax - 1, r.y, 1, r.height), new Color(0, 0, 0, 0.5f));
+    }
+
+
 }
 #endif

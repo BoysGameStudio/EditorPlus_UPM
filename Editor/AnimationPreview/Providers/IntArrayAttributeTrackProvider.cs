@@ -89,7 +89,7 @@ namespace EditorPlus.AnimationPreview
 
             if (arr.Length == 2)
             {
-                var binding = AnimationPreviewDrawer.CreateArrayWindowBinding(target, tm, arr, totalFrames);
+                var binding = CreateArrayWindowBinding(target, tm, arr, totalFrames);
                 AnimationPreviewDrawer.DrawWindowBinding(target, tm, rect, st, totalFrames, controlSeed, binding);
             }
             else
@@ -106,6 +106,33 @@ namespace EditorPlus.AnimationPreview
 
                 if (context) AnimationPreviewDrawer.ShowReadOnlyContextMenu();
             }
+        }
+        // Provider-owned window binding creation for int[] members (moved from drawer)
+        private static WindowBinding CreateArrayWindowBinding(UnityEngine.Object target, TrackMember tm, int[] frames, int totalFrames)
+        {
+            int rawStart = frames.Length > 0 ? frames[0] : 0;
+            int rawEnd = frames.Length > 1 ? frames[1] : rawStart;
+            int start = Mathf.Clamp(rawStart, 0, totalFrames);
+            int end = Mathf.Clamp(rawEnd, 0, totalFrames);
+
+            return new WindowBinding(
+                start,
+                end,
+                tm.Color,
+                string.Empty,
+                (owner, newStart, newEnd) =>
+                {
+                    if (tm.Setter == null || frames.Length < 2) return false;
+                    if (frames[0] == newStart && frames[1] == newEnd) return false;
+
+                    var newArr = (int[])frames.Clone();
+                    newArr[0] = newStart;
+                    newArr[1] = newEnd;
+                    tm.Setter(owner, newArr);
+                    return true;
+                },
+                rawStart,
+                rawEnd);
         }
     }
 }
