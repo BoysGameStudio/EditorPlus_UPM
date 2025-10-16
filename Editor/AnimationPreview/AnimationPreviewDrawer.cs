@@ -325,19 +325,6 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
                 EditorGUI.DrawRect(r, color);
             }
 
-            // Optionally draw scene gizmos for all markers when configured (helps visual debugging and always-on previews)
-            if (TimelineContext.AlwaysShowMarkers && Event.current.type == EventType.Repaint)
-            {
-                try
-                {
-                    foreach (var f in frames)
-                    {
-                        PreviewRenderer.DrawHitFramesPreview(target, f);
-                    }
-                }
-                catch { }
-            }
-
             EditorGUIUtility.AddCursorRect(r, MouseCursor.SlideArrow);
 
             switch (type)
