@@ -285,77 +285,56 @@ namespace EditorPlus.AnimationPreview
         }
 
         // Try to find a GameObject that serves as the preview root for the given target.
-        // Uses conservative reflection (editor-only) to avoid hard dependencies. Returns null if not found.
+        // Typed-first, non-reflective implementation:
+        // - If parentTarget is GameObject or Component, use that.
+        // - Otherwise, check common serialized property names (previewRoot, previewGO, tempPreviewGO, etc.) using SerializedObject.
+        // - As a last resort, try the temporary preview GameObject name if created by the preview host.
+        // This avoids iterating fields/properties via reflection while preserving common serialized fallbacks.
         public static GameObject ResolvePreviewRoot(UnityEngine.Object parentTarget)
         {
+            if (parentTarget == null) return null;
+
+            // Direct cases
+            if (parentTarget is GameObject go) return go;
+            if (parentTarget is Component comp) return comp.gameObject;
+
             try
             {
-                if (parentTarget == null) return null;
-                if (parentTarget is GameObject go) return go;
+                var so = new SerializedObject(parentTarget);
+                // Common property names that users/projects tend to use for preview roots
+                string[] propNames = new[] { "previewRoot", "_previewRoot", "previewGO", "_previewGO", "tempPreviewGO", "_tempPreviewGO", "previewObject", "_previewObject" };
 
-                var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-                var t = parentTarget.GetType();
-                string[] names = new[] { "_tempPreviewGO", "tempPreviewGO", "_previewGO", "previewGO", "_previewRoot", "previewRoot" };
-
-                foreach (var name in names)
+                foreach (var name in propNames)
                 {
                     try
                     {
-                        var fi2 = t.GetField(name, flags | BindingFlags.Instance);
-                        if (fi2 != null)
+                        var prop = so.FindProperty(name);
+                        if (prop == null) continue;
+
+                        // If it's an object reference, return it if suitable
+                        if (prop.propertyType == SerializedPropertyType.ObjectReference)
                         {
-                            var v = fi2.GetValue(parentTarget);
-                            if (v is GameObject gg) return gg;
+                            var obj = prop.objectReferenceValue;
+                            if (obj is GameObject g) return g;
+                            if (obj is Component c) return c.gameObject;
                         }
-                        var fsi = t.GetField(name, flags | BindingFlags.Static);
-                        if (fsi != null)
+
+                        // Some serialized wrappers may expose a child field holding the reference
+                        var candidate = prop.FindPropertyRelative("gameObject") ?? prop.FindPropertyRelative("m_GameObject") ?? prop.FindPropertyRelative("objectReferenceValue");
+                        if (candidate != null && candidate.propertyType == SerializedPropertyType.ObjectReference)
                         {
-                            var vs = fsi.GetValue(null);
-                            if (vs is GameObject sgg) return sgg;
-                        }
-                        var pi = t.GetProperty(name, flags | BindingFlags.Instance);
-                        if (pi != null && pi.CanRead)
-                        {
-                            var pv = pi.GetValue(parentTarget, null);
-                            if (pv is GameObject pg) return pg;
+                            var obj2 = candidate.objectReferenceValue;
+                            if (obj2 is GameObject g2) return g2;
+                            if (obj2 is Component c2) return c2.gameObject;
                         }
                     }
                     catch { }
                 }
-
-                // Search instance fields/properties for a GameObject or Component reference
-                try
-                {
-                    foreach (var field in t.GetFields(flags))
-                    {
-                        try
-                        {
-                            var val = field.GetValue(parentTarget);
-                            if (val is GameObject ggo) return ggo;
-                            if (val is Component comp) return comp.gameObject;
-                        }
-                        catch { }
-                    }
-
-                    foreach (var pinfo in t.GetProperties(flags))
-                    {
-                        try
-                        {
-                            if (!pinfo.CanRead) continue;
-                            var val = pinfo.GetValue(parentTarget, null);
-                            if (val is GameObject ggo) return ggo;
-                            if (val is Component comp) return comp.gameObject;
-                        }
-                        catch { }
-                    }
-                }
-                catch { }
-
-                // Last resort: named temporary preview object created by preview host
-                try { return GameObject.Find("__DashTempPreview__"); } catch { }
-                return null;
             }
             catch { }
+
+            // Last resort: named temporary preview object created by preview host
+            try { return GameObject.Find("__DashTempPreview__"); } catch { }
             return null;
         }
 

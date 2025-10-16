@@ -12,6 +12,47 @@ namespace EditorPlus.AnimationPreview
         {
             value = 0;
             if (instance == null || string.IsNullOrEmpty(memberName)) return false;
+
+            // Typed-first fast paths (no reflection): handle known Quantum types directly
+            try
+            {
+                // AttackActionData / ActiveActionIFrames / AffectWindow common int members
+                if (instance is Quantum.ActiveActionIFrames iFrames)
+                {
+                    if (memberName.Equals("IntraActionStartFrame", StringComparison.OrdinalIgnoreCase)) { value = iFrames.IntraActionStartFrame; return true; }
+                    if (memberName.Equals("IntraActionEndFrame", StringComparison.OrdinalIgnoreCase)) { value = iFrames.IntraActionEndFrame; return true; }
+                }
+
+                if (instance is Quantum.ActiveActionAffectWindow affectWindow)
+                {
+                    if (memberName.Equals("IntraActionStartFrame", StringComparison.OrdinalIgnoreCase)) { value = affectWindow.IntraActionStartFrame; return true; }
+                    if (memberName.Equals("IntraActionEndFrame", StringComparison.OrdinalIgnoreCase)) { value = affectWindow.IntraActionEndFrame; return true; }
+                }
+
+                // If instance is a frame element or implements ICastFrame, try Frame/Frame property
+                if (instance is Quantum.HitFrame hf)
+                {
+                    if (memberName.Equals("frame", StringComparison.OrdinalIgnoreCase) || memberName.Equals("Frame", StringComparison.OrdinalIgnoreCase)) { value = hf.frame; return true; }
+                }
+                if (instance is Quantum.ProjectileFrame pf)
+                {
+                    if (memberName.Equals("frame", StringComparison.OrdinalIgnoreCase) || memberName.Equals("Frame", StringComparison.OrdinalIgnoreCase)) { value = pf.frame; return true; }
+                }
+                if (instance is Quantum.ChildActorFrame caf)
+                {
+                    if (memberName.Equals("frame", StringComparison.OrdinalIgnoreCase) || memberName.Equals("Frame", StringComparison.OrdinalIgnoreCase)) { value = caf.Frame; return true; }
+                }
+
+                // If instance is AttackActionData or similar, handle common members
+                if (instance is Quantum.ActiveActionData aad)
+                {
+                    if (memberName.Equals("MoveInterruptionLockEndFrame", StringComparison.OrdinalIgnoreCase)) { value = aad.MoveInterruptionLockEndFrame; return true; }
+                    if (memberName.Equals("ActionMovementStartFrame", StringComparison.OrdinalIgnoreCase)) { value = aad.ActionMovementStartFrame; return true; }
+                }
+            }
+            catch { /* fallthrough to reflection fallback */ }
+
+            // Reflection fallback (existing logic)
             var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
             try
             {
@@ -47,6 +88,24 @@ namespace EditorPlus.AnimationPreview
         public static bool TrySetIntMember(object instance, string memberName, int newValue)
         {
             if (instance == null || string.IsNullOrEmpty(memberName)) return false;
+
+            // Typed-first: handle some known writable members
+            try
+            {
+                if (instance is Quantum.ActiveActionIFrames iFrames)
+                {
+                    if (memberName.Equals("IntraActionStartFrame", StringComparison.OrdinalIgnoreCase)) { iFrames.IntraActionStartFrame = newValue; return true; }
+                    if (memberName.Equals("IntraActionEndFrame", StringComparison.OrdinalIgnoreCase)) { iFrames.IntraActionEndFrame = newValue; return true; }
+                }
+
+                if (instance is Quantum.ActiveActionAffectWindow affectWindow)
+                {
+                    if (memberName.Equals("IntraActionStartFrame", StringComparison.OrdinalIgnoreCase)) { affectWindow.IntraActionStartFrame = newValue; return true; }
+                    if (memberName.Equals("IntraActionEndFrame", StringComparison.OrdinalIgnoreCase)) { affectWindow.IntraActionEndFrame = newValue; return true; }
+                }
+            }
+            catch { /* fallthrough to reflection fallback */ }
+
             var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
             try
             {
@@ -81,6 +140,28 @@ namespace EditorPlus.AnimationPreview
         {
             if (owner == null || member == null) return Array.Empty<int>();
 
+            // Typed-first: if owner is a known Quantum asset with direct arrays, read them without reflection
+            try
+            {
+                if (owner is Quantum.AttackActionData attack)
+                {
+                    if (attack.hitFrames != null)
+                    {
+                        var tmp = new System.Collections.Generic.List<int>(attack.hitFrames.Length);
+                        foreach (var hf in attack.hitFrames) if (hf != null) tmp.Add(hf.frame);
+                        return tmp.ToArray();
+                    }
+
+                    if (attack.projectileFrames != null)
+                    {
+                        var tmp = new System.Collections.Generic.List<int>(attack.projectileFrames.Length);
+                        foreach (var pf in attack.projectileFrames) if (pf != null) tmp.Add(pf.frame);
+                        return tmp.ToArray();
+                    }
+                }
+            }
+            catch { /* fallthrough to reflection/serialized fallback */ }
+
             try
             {
                 Func<object> getter = null;
@@ -91,7 +172,6 @@ namespace EditorPlus.AnimationPreview
                 if (arrObj != null)
                 {
                     var list = new System.Collections.Generic.List<int>(arrObj.Length);
-                    var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
                     for (int i = 0; i < arrObj.Length; i++)
                     {
                         var elem = arrObj.GetValue(i);
@@ -133,6 +213,16 @@ namespace EditorPlus.AnimationPreview
         {
             value = -1;
             if (instance == null) return false;
+
+            // Typed-first: common frame container types
+            try
+            {
+                if (instance is Quantum.HitFrame hf && (name.Equals("frame", StringComparison.OrdinalIgnoreCase) || name.Equals("Frame", StringComparison.OrdinalIgnoreCase))) { value = hf.frame; return true; }
+                if (instance is Quantum.ProjectileFrame pf && (name.Equals("frame", StringComparison.OrdinalIgnoreCase) || name.Equals("Frame", StringComparison.OrdinalIgnoreCase))) { value = pf.frame; return true; }
+                if (instance is Quantum.ChildActorFrame caf && (name.Equals("frame", StringComparison.OrdinalIgnoreCase) || name.Equals("Frame", StringComparison.OrdinalIgnoreCase))) { value = caf.Frame; return true; }
+            }
+            catch { /* fallthrough to reflection below */ }
+
             var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
             try
             {

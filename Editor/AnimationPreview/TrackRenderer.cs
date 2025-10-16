@@ -39,10 +39,186 @@ namespace EditorPlus.AnimationPreview
             var type = target.GetType();
             if (!TimelineContext.TrackMembersCache.TryGetValue(type, out var cached))
             {
-                cached = BuildTrackMembersForType(type);
+                // Prefer typed descriptors for known Quantum types to avoid reflection into simulation types.
+                cached = BuildTrackMembersForType_TypedFirst(type) ?? BuildTrackMembersForType(type);
                 TimelineContext.TrackMembersCache[type] = cached;
             }
             return cached;
+        }
+
+        // Try to build track members using explicit typed descriptors for known Quantum/Simulation types.
+        // Returns null if no typed descriptor is available for the requested type.
+        private static TrackMember[] BuildTrackMembersForType_TypedFirst(Type type)
+        {
+            if (type == null) return null;
+
+            // ActiveActionData explicit mapping
+            if (type.FullName == "Quantum.ActiveActionData" || type.Name == "ActiveActionData")
+            {
+                // Build explicit TrackMember array matching the AnimationEventAttribute annotations in source.
+                var list = new List<TrackMember>();
+
+                // MoveInterruptionLockEndFrame -> int MoveInterruptionLockEndFrame
+                list.Add(new TrackMember
+                {
+                    Member = null,
+                    Label = "Move Lock End",
+                    ValueType = typeof(int),
+                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#4BA5E8", AnimationPreviewDrawer.DefaultColorFor(typeof(int))),
+                    Getter = owner => {
+                        var a = owner as UnityEngine.Object;
+                        // Owner is expected to be a UnityEngine.Object wrapper for ActiveActionData serialized asset
+                        // Use serialized property fallback in the editor drawer if instance access fails.
+                        var asObj = owner as UnityEngine.Object;
+                        if (asObj == null) return 0;
+                        var so = new SerializedObject(asObj);
+                        var prop = so.FindProperty("MoveInterruptionLockEndFrame");
+                        if (prop != null) return prop.intValue;
+                        return 0;
+                    },
+                    Setter = (owner, value) => {
+                        var asObj = owner as UnityEngine.Object;
+                        if (asObj == null) return;
+                        var so = new SerializedObject(asObj);
+                        var prop = so.FindProperty("MoveInterruptionLockEndFrame");
+                        if (prop != null) { prop.intValue = (int)value; so.ApplyModifiedProperties(); }
+                    },
+                    Order = -2
+                });
+
+                // ActionMovementStartFrame
+                list.Add(new TrackMember
+                {
+                    Member = null,
+                    Label = "Action Move Start Frame",
+                    ValueType = typeof(int),
+                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#4BA5E8", AnimationPreviewDrawer.DefaultColorFor(typeof(int))),
+                    Getter = owner => {
+                        var asObj = owner as UnityEngine.Object;
+                        if (asObj == null) return 0;
+                        var so = new SerializedObject(asObj);
+                        var prop = so.FindProperty("ActionMovementStartFrame");
+                        if (prop != null) return prop.intValue;
+                        return 0;
+                    },
+                    Setter = (owner, value) => {
+                        var asObj = owner as UnityEngine.Object;
+                        if (asObj == null) return;
+                        var so = new SerializedObject(asObj);
+                        var prop = so.FindProperty("ActionMovementStartFrame");
+                        if (prop != null) { prop.intValue = (int)value; so.ApplyModifiedProperties(); }
+                    },
+                    Order = 0
+                });
+
+                // NonHitLockableFrames (int[])
+                list.Add(new TrackMember
+                {
+                    Member = null,
+                    Label = "Non-Hit Lock Window",
+                    ValueType = typeof(int[]),
+                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#CB7AF3", AnimationPreviewDrawer.DefaultColorFor(typeof(int[]))),
+                    Getter = owner => {
+                        var asObj = owner as UnityEngine.Object;
+                        if (asObj == null) return Array.Empty<int>();
+                        var so = new SerializedObject(asObj);
+                        var prop = so.FindProperty("NonHitLockableFrames");
+                        if (prop != null && prop.isArray)
+                        {
+                            var arr = new List<int>();
+                            for (int i = 0; i < prop.arraySize; i++) arr.Add(prop.GetArrayElementAtIndex(i).intValue);
+                            return arr.ToArray();
+                        }
+                        return Array.Empty<int>();
+                    },
+                    Setter = (owner, value) => {
+                        var asObj = owner as UnityEngine.Object;
+                        if (asObj == null) return;
+                        var so = new SerializedObject(asObj);
+                        var prop = so.FindProperty("NonHitLockableFrames");
+                        if (prop != null && prop.isArray)
+                        {
+                            var arr = value as int[] ?? Array.Empty<int>();
+                            prop.arraySize = arr.Length;
+                            for (int i = 0; i < arr.Length; i++) prop.GetArrayElementAtIndex(i).intValue = arr[i];
+                            so.ApplyModifiedProperties();
+                        }
+                    },
+                    Order = 1
+                });
+
+                // IFrames (ActiveActionIFrames) -> treat as affect window
+                list.Add(new TrackMember
+                {
+                    Member = null,
+                    Label = "I-Frames",
+                    ValueType = typeof(object),
+                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#82E0AA", AnimationPreviewDrawer.DefaultColorFor(typeof(object))),
+                    Getter = owner => {
+                        var asObj = owner as UnityEngine.Object;
+                        if (asObj == null) return null;
+                        var so = new SerializedObject(asObj);
+                        var prop = so.FindProperty("IFrames");
+                        if (prop != null) return prop; // pass SerializedProperty for drawer's CreateAffectWindowBinding support
+                        return null;
+                    },
+                    Setter = null,
+                    Order = 2
+                });
+
+                // AffectWindow
+                list.Add(new TrackMember
+                {
+                    Member = null,
+                    Label = "Affect Window",
+                    ValueType = typeof(object),
+                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#F5B041", AnimationPreviewDrawer.DefaultColorFor(typeof(object))),
+                    Getter = owner => {
+                        var asObj = owner as UnityEngine.Object;
+                        if (asObj == null) return null;
+                        var so = new SerializedObject(asObj);
+                        var prop = so.FindProperty("AffectWindow");
+                        if (prop != null) return prop;
+                        return null;
+                    },
+                    Setter = null,
+                    Order = 3
+                });
+
+                return list.ToArray();
+            }
+
+            // PlayerDashActionData: Dash End Frame
+            if (type.FullName == "Quantum.PlayerDashActionData" || type.Name == "PlayerDashActionData")
+            {
+                var member = new TrackMember
+                {
+                    Member = null,
+                    Label = "Dash End Frame",
+                    ValueType = typeof(int),
+                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#FF8C5A", AnimationPreviewDrawer.DefaultColorFor(typeof(int))),
+                    Getter = owner => {
+                        var asObj = owner as UnityEngine.Object;
+                        if (asObj == null) return 0;
+                        var so = new SerializedObject(asObj);
+                        var prop = so.FindProperty("DashEndFrame") ?? so.FindProperty("DashEndFrame");
+                        if (prop != null) return prop.intValue;
+                        // fallback to common name 'DashEndFrame' or 'Dash End Frame' is handled by attribute label
+                        return 0;
+                    },
+                    Setter = (owner, value) => {
+                        var asObj = owner as UnityEngine.Object;
+                        if (asObj == null) return;
+                        var so = new SerializedObject(asObj);
+                        var prop = so.FindProperty("DashEndFrame");
+                        if (prop != null) { prop.intValue = (int)value; so.ApplyModifiedProperties(); }
+                    },
+                    Order = -1
+                };
+                return new[] { member };
+            }
+
+            return null;
         }
 
         public static TrackMember[] BuildTrackMembersForType(Type type)
