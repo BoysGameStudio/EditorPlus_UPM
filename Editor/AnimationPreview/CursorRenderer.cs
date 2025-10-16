@@ -10,7 +10,13 @@ namespace EditorPlus.AnimationPreview
         {
             if (totalFrames <= 0) return;
             bool hasPreview = ActiveActionIntegration.HasPreview(parentTarget);
-            if (!hasPreview && !st.IsSeeking) return;
+            // Draw preview when scrubbing or when a preview player is active. Previously this returned early
+            // and suppressed hit-frame Scene gizmos when no runtime preview existed. Allow drawing during seek
+            // so assets show their hit frames in SceneView while editing.
+            if (!hasPreview && !st.IsSeeking)
+            {
+                // still draw cursor line but skip trying to get live preview frame
+            }
 
             int frame = st.CursorFrame;
             int previewFrame;

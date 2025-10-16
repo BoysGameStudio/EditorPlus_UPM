@@ -195,6 +195,35 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
             }
         }
 
+        // Prefer a candidate that declares a Timeline track member (AnimationEventAttribute)
+        var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
+        foreach (var c in candidates)
+        {
+            try
+            {
+                var t = c.GetType();
+                // If the type declares a member named 'hitFrames', prefer it
+                if (t.GetField("hitFrames", flags) != null || t.GetProperty("hitFrames", flags) != null)
+                {
+                    return c;
+                }
+
+                // Otherwise, prefer any member annotated with AnimationEventAttribute
+                foreach (var m in t.GetMembers(flags))
+                {
+                    try
+                    {
+                        if (m.GetCustomAttribute<AnimationEventAttribute>() != null)
+                        {
+                            return c;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
         // Fallback to the first collected candidate
         if (candidates.Count > 0)
         {
@@ -242,6 +271,15 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
                     : $"Frame: {playbackFrame} ({seconds:0.###}s)";
             }
             GUILayout.Label(frameInfo, GUILayout.Width(200));
+
+            // DEBUG: show resolved owner type and discovered track count
+            try
+            {
+                var ownerType = parentTarget != null ? parentTarget.GetType().Name : "(null)";
+                var tracks = parentTarget != null ? GetTrackMembers(parentTarget).Length : 0;
+                GUILayout.Label($"Owner: {ownerType}  Tracks: {tracks}", GUILayout.Width(260));
+            }
+            catch { }
 
             GUILayout.Label("Zoom", GUILayout.Width(40));
             st.Zoom = GUILayout.HorizontalSlider(st.Zoom, 0.25f, 6f, GUILayout.Width(120));
@@ -600,6 +638,160 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
                 ShowReadOnlyContextMenu();
             }
         }
+        else if (tm.ValueType != null && tm.ValueType.IsArray)
+        {
+            // Support arrays of POCO/frame structs like HitFrame[] where each element has a 'frame' int member.
+            var arrObj = tm.Getter?.Invoke(target) as Array;
+            int[] frames = Array.Empty<int>();
+            object[] elements = null;
+            if (arrObj != null)
+            {
+                var list = new List<int>(arrObj.Length);
+                elements = new object[arrObj.Length];
+                var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                for (int i = 0; i < arrObj.Length; i++)
+                {
+                    var elem = arrObj.GetValue(i);
+                    elements[i] = elem;
+                    if (elem == null) continue;
+                    int elemFrame = -1;
+                    var fField = elem.GetType().GetField("frame", flags);
+                    if (fField != null)
+                    {
+                        var fv = fField.GetValue(elem);
+                        if (fv is int iv) elemFrame = iv;
+                        else if (fv is long lv) elemFrame = (int)lv;
+                        else if (fv != null) { try { elemFrame = Convert.ToInt32(fv); } catch { elemFrame = -1; } }
+                    }
+                    else
+                    {
+                        var pInfo = elem.GetType().GetProperty("frame", flags);
+                        if (pInfo != null)
+                        {
+                            var pv = pInfo.GetValue(elem, null);
+                            if (pv is int piv) elemFrame = piv;
+                            else if (pv is long plv) elemFrame = (int)plv;
+                            else if (pv != null) { try { elemFrame = Convert.ToInt32(pv); } catch { elemFrame = -1; } }
+                        }
+                    }
+                    if (elemFrame >= 0) list.Add(elemFrame);
+                    else list.Add(-1);
+                }
+
+                // Build frames array for drawing: use -1 entries as skipped
+                var tmp = new List<int>(list.Count);
+                for (int i = 0; i < list.Count; i++) if (list[i] >= 0) tmp.Add(list[i]);
+                frames = tmp.ToArray();
+            }
+
+            if (frames != null && frames.Length > 0)
+            {
+                // DEBUG: show count of detected elements in the track (helps debug why markers may be missing)
+                if (Event.current.type == EventType.Repaint)
+                {
+                    try
+                    {
+                        var dbgRect = new Rect(rect.x + 4, rect.y + 2, 200, 16);
+                        GUIStyle s = new GUIStyle(EditorStyles.miniLabel) { normal = { textColor = Color.white } };
+                        GUI.Label(dbgRect, $"Elements: { (arrObj != null ? arrObj.Length : 0) }  FramesDrawn: {frames.Length}", s);
+                    }
+                    catch { }
+                }
+                DrawMarkers(target, tm, rect, st, frames, tm.Color, TimelineContext.MarkerWidth, TimelineContext.ComputeControlSeed(target, tm), totalFrames, out int clickedIndex, out bool context, out int draggedIndex, out int draggedFrame);
+
+                // Removed verbose diagnostic logging; keep drawing only.
+
+                // If a drag changed a frame and we have a setter, try to update the backing element's 'frame' member and apply.
+                if (draggedIndex >= 0 && draggedFrame >= 0 && arrObj != null && tm.Setter != null)
+                {
+                    // Need to map draggedIndex in compacted frames[] back to original element index
+                    int mapped = -1; int seen = 0;
+                    for (int i = 0; i < arrObj.Length; i++)
+                    {
+                        var elem = arrObj.GetValue(i);
+                        if (elem == null) continue;
+                        int ef = -1;
+                        var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                        var fField = elem.GetType().GetField("frame", flags);
+                        if (fField != null)
+                        {
+                            var fv = fField.GetValue(elem);
+                            if (fv is int iv) ef = iv;
+                            else if (fv is long lv) ef = (int)lv;
+                            else if (fv != null) { try { ef = Convert.ToInt32(fv); } catch { ef = -1; } }
+                        }
+                        else
+                        {
+                            var pInfo = elem.GetType().GetProperty("frame", flags);
+                            if (pInfo != null)
+                            {
+                                var pv = pInfo.GetValue(elem, null);
+                                if (pv is int piv) ef = piv;
+                                else if (pv is long plv) ef = (int)plv;
+                                else if (pv != null) { try { ef = Convert.ToInt32(pv); } catch { ef = -1; } }
+                            }
+                        }
+                        if (ef >= 0)
+                        {
+                            if (seen == draggedIndex) { mapped = i; break; }
+                            seen++;
+                        }
+                    }
+
+                    if (mapped >= 0)
+                    {
+                        var elem = arrObj.GetValue(mapped);
+                        if (elem != null)
+                        {
+                            if (EditorPlus.AnimationPreview.TimelineUtils.TrySetIntMember(elem, "frame", draggedFrame))
+                            {
+                                try { arrObj.SetValue(elem, mapped); } catch { }
+                                try
+                                {
+                                    tm.Setter(target, arrObj);
+                                    EditorUtility.SetDirty(target);
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+                }
+
+                if (context)
+                {
+                    ShowReadOnlyContextMenu();
+                }
+            }
+            else
+            {
+                    // Fallback: try reading via SerializedProperty in case the getter doesn't expose the runtime array
+                    bool drewFromSerialized = false;
+                    try
+                    {
+                        // Use centralized helper which handles getter and SerializedProperty fallback.
+                        frames = EditorPlus.AnimationPreview.TimelineUtils.ReadFrameArray(target, tm.Member);
+                        if (frames != null && frames.Length > 0)
+                        {
+                            DrawMarkers(target, tm, rect, st, frames, tm.Color, TimelineContext.MarkerWidth, TimelineContext.ComputeControlSeed(target, tm), totalFrames, out int clickedIndex2, out bool context2, out int draggedIndex2, out int draggedFrame2);
+                            if (context2) ShowReadOnlyContextMenu();
+                            drewFromSerialized = true;
+                        }
+                    }
+                    catch { }
+
+                    if (!drewFromSerialized)
+                    {
+                        // Diagnostic: log that an array exists but no valid frame values were found
+                        // No valid frame values discovered; show empty indicator.
+
+                        // No frame-like elements: show empty indicator
+                        EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.02f));
+                        var c = GUI.color; GUI.color = new Color(1, 1, 1, 0.5f);
+                        GUI.Label(rect, "〈No Frame Data〉", SirenixGUIStyles.MiniLabelCentered);
+                        GUI.color = c;
+                    }
+            }
+        }
         else if (tm.ValueType == typeof(int[]))
         {
             var arr = (int[])(tm.Getter?.Invoke(target) ?? Array.Empty<int>());
@@ -739,6 +931,19 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
             if (Event.current.type == EventType.Repaint)
             {
                 EditorGUI.DrawRect(r, color);
+            }
+
+            // Optionally draw scene gizmos for all markers when configured (helps visual debugging and always-on previews)
+            if (TimelineContext.AlwaysShowMarkers && Event.current.type == EventType.Repaint)
+            {
+                try
+                {
+                    foreach (var f in frames)
+                    {
+                        PreviewRenderer.DrawHitFramesPreview(target, f);
+                    }
+                }
+                catch { }
             }
 
             EditorGUIUtility.AddCursorRect(r, MouseCursor.SlideArrow);
@@ -1139,89 +1344,12 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
 
     private static bool TrySetIntMember(object instance, string memberName, int value)
     {
-        if (instance == null) return false;
-
-        var type = instance.GetType();
-        var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
-
-        var prop = type.GetProperty(memberName, flags, null, typeof(int), Type.EmptyTypes, null);
-        if (prop != null && prop.CanWrite)
-        {
-            prop.SetValue(instance, value);
-            return true;
-        }
-
-        var field = type.GetField(memberName, flags);
-        if (field != null && field.FieldType == typeof(int))
-        {
-            field.SetValue(instance, value);
-            return true;
-        }
-
-        // Try backing field patterns (_member or m_member)
-        string camel = char.ToLowerInvariant(memberName[0]) + memberName.Substring(1);
-        field = type.GetField(camel, flags);
-        if (field != null && field.FieldType == typeof(int))
-        {
-            field.SetValue(instance, value);
-            return true;
-        }
-
-        field = type.GetField("_" + camel, flags);
-        if (field != null && field.FieldType == typeof(int))
-        {
-            field.SetValue(instance, value);
-            return true;
-        }
-
-        field = type.GetField("m_" + memberName, flags);
-        if (field != null && field.FieldType == typeof(int))
-        {
-            field.SetValue(instance, value);
-            return true;
-        }
-
-        return false;
+        return EditorPlus.AnimationPreview.TimelineUtils.TrySetIntMember(instance, memberName, value);
     }
 
     private static int TryGetIntMember(object instance, string memberName, int fallback)
     {
-        if (instance == null) return fallback;
-
-        var type = instance.GetType();
-        var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
-
-        var prop = type.GetProperty(memberName, flags, null, typeof(int), Type.EmptyTypes, null);
-        if (prop != null && prop.CanRead)
-        {
-            try { return (int)prop.GetValue(instance, null); } catch { }
-        }
-
-        var field = type.GetField(memberName, flags);
-        if (field != null && field.FieldType == typeof(int))
-        {
-            try { return (int)field.GetValue(instance); } catch { }
-        }
-
-        string camel = char.ToLowerInvariant(memberName[0]) + memberName.Substring(1);
-        field = type.GetField(camel, flags);
-        if (field != null && field.FieldType == typeof(int))
-        {
-            try { return (int)field.GetValue(instance); } catch { }
-        }
-
-        field = type.GetField("_" + camel, flags);
-        if (field != null && field.FieldType == typeof(int))
-        {
-            try { return (int)field.GetValue(instance); } catch { }
-        }
-
-        field = type.GetField("m_" + memberName, flags);
-        if (field != null && field.FieldType == typeof(int))
-        {
-            try { return (int)field.GetValue(instance); } catch { }
-        }
-
+        if (EditorPlus.AnimationPreview.TimelineUtils.TryGetIntMember(instance, memberName, out var v)) return v;
         return fallback;
     }
 
@@ -1276,42 +1404,15 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         GUIHelper.RequestRepaint();
     }
 
-    // ---------------- HitFrame preview rendering (minimal) ----------------
+    // ---------------- HitFrame preview rendering ----------------
+    // Delegates to PreviewRenderer to centralize preview drawing logic.
     private static void DrawHitFramesPreview(UnityEngine.Object parentTarget, int frame)
     {
         if (parentTarget == null) return;
-
+        if (Event.current?.type != EventType.Repaint) return;
         try
         {
-            if (Event.current.type != EventType.Repaint) return;
-
-            var so = new SerializedObject(parentTarget);
-            var prop = so.FindProperty("hitFrames");
-            if (prop == null) return;
-            for (int i = 0; i < prop.arraySize; i++)
-            {
-                var elem = prop.GetArrayElementAtIndex(i);
-                if (elem == null) continue;
-                var frameProp = elem.FindPropertyRelative("frame");
-                if (frameProp == null) continue;
-                if (frameProp.intValue != frame) continue;
-
-                // Try to find a shape property on the hitFrame element. If present, draw an approximate shape.
-                var shapeProp = elem.FindPropertyRelative("shape");
-                if (shapeProp != null && shapeProp.propertyType == SerializedPropertyType.Generic)
-                {
-                    DrawShape3DConfigPreview(shapeProp, parentTarget as GameObject);
-                }
-                else
-                {
-                    // Fallback: Draw a simple indicator at world origin as a safe, non-invasive preview.
-                    Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
-                    Handles.DrawWireDisc(Vector3.zero, Vector3.up, 0.5f);
-                    Handles.Label(Vector3.up * 0.6f, "HitFrame");
-                }
-
-                break;
-            }
+            PreviewRenderer.DrawHitFramesPreview(parentTarget, frame);
         }
         catch { }
     }
