@@ -620,40 +620,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         menu.ShowAsContext();
     }
 
-    private static bool ApplyAffectWindowChanges(UnityEngine.Object target, TrackMember tm, object windowInstance, int newStart, int newEnd)
-    {
-        if (windowInstance == null)
-        {
-            return false;
-        }
-
-        var type = windowInstance.GetType();
-        bool updatedStart = TrySetIntMember(windowInstance, "IntraActionStartFrame", newStart);
-        bool updatedEnd = TrySetIntMember(windowInstance, "IntraActionEndFrame", newEnd);
-        bool anyUpdated = updatedStart || updatedEnd;
-
-        if (anyUpdated)
-        {
-            if (type.IsValueType)
-            {
-                if (tm.Setter == null)
-                {
-                    return false;
-                }
-
-                tm.Setter(target, windowInstance);
-            }
-            return true;
-        }
-
-        if (tm.Setter != null)
-        {
-            tm.Setter(target, windowInstance);
-            return true;
-        }
-
-        return false;
-    }
+    // ApplyAffectWindowChanges was moved to IActionAffectWindowTrackProvider so the provider owns apply logic
 
     internal static void DrawWindowBinding(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames, int controlSeed, WindowBinding binding)
     {
@@ -701,90 +668,8 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
             rawEnd);
     }
 
-    internal static WindowBinding CreateAffectWindowBinding(UnityEngine.Object target, TrackMember tm, object window, int totalFrames)
-    {
-        int rawStart = TryGetIntMember(window, "IntraActionStartFrame", 0);
-        int rawEnd = TryGetIntMember(window, "IntraActionEndFrame", rawStart);
-        int start = Mathf.Clamp(rawStart, 0, totalFrames);
-        int end = Mathf.Clamp(rawEnd, 0, totalFrames);
-
-        return new WindowBinding(
-            start,
-            end,
-            tm.Color,
-            string.Empty,
-            (owner, newStart, newEnd) => ApplyAffectWindowChanges(owner, tm, window, newStart, newEnd));
-    }
-
-    private static bool TrySetIntMember(object instance, string memberName, int value)
-    {
-        if (instance == null || string.IsNullOrEmpty(memberName)) return false;
-        try
-        {
-            // SerializedProperty path (editor asset case)
-            if (instance is SerializedProperty sp)
-            {
-                var p = sp.FindPropertyRelative(memberName);
-                if (p != null)
-                {
-                    p.intValue = value;
-                    sp.serializedObject.ApplyModifiedProperties();
-                    return true;
-                }
-                return false;
-            }
-            // Reflection-based setter for normal objects/structs
-            var t = instance.GetType();
-            // Field
-            var fi = t.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
-            if (fi != null && fi.FieldType == typeof(int))
-            {
-                fi.SetValue(instance, value);
-                return true;
-            }
-            // Property
-            var pi = t.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
-            if (pi != null && pi.CanWrite && pi.PropertyType == typeof(int))
-            {
-                pi.SetValue(instance, value, null);
-                return true;
-            }
-        }
-        catch { }
-        return false;
-    }
-
-    private static int TryGetIntMember(object instance, string memberName, int fallback)
-    {
-        if (instance == null || string.IsNullOrEmpty(memberName)) return fallback;
-        try
-        {
-            if (instance is SerializedProperty sp)
-            {
-                var p = sp.FindPropertyRelative(memberName);
-                if (p != null) return p.intValue;
-                return fallback;
-            }
-            // Reflection-based getter
-            var t = instance.GetType();
-            var fi = t.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
-            if (fi != null && fi.FieldType == typeof(int))
-            {
-                var v = fi.GetValue(instance);
-                if (v is int iv) return iv;
-                return fallback;
-            }
-            var pi = t.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
-            if (pi != null && pi.CanRead && pi.PropertyType == typeof(int))
-            {
-                var v = pi.GetValue(instance, null);
-                if (v is int iv2) return iv2;
-                return fallback;
-            }
-        }
-        catch { }
-        return fallback;
-    }
+    // CreateAffectWindowBinding, ApplyAffectWindowChanges, TrySetIntMember and TryGetIntMember
+    // were moved to IActionAffectWindowTrackProvider so the provider owns all type-specific logic.
 
     // Window drag state, ActiveActionIntegration and TimelineState moved to partial files.
 

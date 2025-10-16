@@ -92,7 +92,7 @@ namespace EditorPlus.AnimationPreview
             var windowInstance = tm.Getter?.Invoke(target);
             if (windowInstance != null)
             {
-                var binding = AnimationPreviewDrawer.CreateAffectWindowBinding(target, tm, windowInstance, totalFrames);
+                var binding = CreateAffectWindowBinding(target, tm, windowInstance, totalFrames);
                 AnimationPreviewDrawer.DrawWindowBinding(target, tm, rect, st, totalFrames, TimelineContext.ComputeControlSeed(target, tm), binding);
 
                 var evt = Event.current;
@@ -110,6 +110,98 @@ namespace EditorPlus.AnimationPreview
                 GUI.color = c;
             }
         }
+
+        // Provider-owned helpers for affect-window binding and apply logic. These replace the previous
+        // animation-drawer-level reflection helpers so the provider can manage its own typed behavior.
+        private static WindowBinding CreateAffectWindowBinding(UnityEngine.Object target, TrackMember tm, object window, int totalFrames)
+        {
+            // Prefer the strongly-typed interface when available
+            int rawStart = 0;
+            int rawEnd = 0;
+            if (window is IActionAffectWindow iaw)
+            {
+                rawStart = iaw.IntraActionStartFrame;
+                rawEnd = iaw.IntraActionEndFrame;
+            }
+
+            int start = Mathf.Clamp(rawStart, 0, totalFrames);
+            int end = Mathf.Clamp(rawEnd, 0, totalFrames);
+
+            return new WindowBinding(
+                start,
+                end,
+                tm.Color,
+                string.Empty,
+                (owner, newStart, newEnd) => ApplyAffectWindowChanges(owner, tm, window, newStart, newEnd));
+        }
+
+        private static bool ApplyAffectWindowChanges(UnityEngine.Object target, TrackMember tm, object windowInstance, int newStart, int newEnd)
+        {
+            if (windowInstance == null)
+            {
+                return false;
+            }
+
+            bool anyUpdated = false;
+
+            // SerializedProperty case (asset/serialized fallback)
+            if (windowInstance is SerializedProperty sp)
+            {
+                var pStart = sp.FindPropertyRelative("IntraActionStartFrame");
+                var pEnd = sp.FindPropertyRelative("IntraActionEndFrame");
+                if (pStart != null && pStart.intValue != newStart) { pStart.intValue = newStart; anyUpdated = true; }
+                if (pEnd != null && pEnd.intValue != newEnd) { pEnd.intValue = newEnd; anyUpdated = true; }
+                if (anyUpdated) sp.serializedObject.ApplyModifiedProperties();
+            }
+            else
+            {
+                // Try common concrete types which expose writable fields using pattern matching.
+                switch (windowInstance)
+                {
+                    case Quantum.ActiveActionAffectWindow aa:
+                        if (aa.IntraActionStartFrame != newStart) { aa.IntraActionStartFrame = newStart; anyUpdated = true; }
+                        if (aa.IntraActionEndFrame != newEnd) { aa.IntraActionEndFrame = newEnd; anyUpdated = true; }
+                        break;
+
+                    case Quantum.ActiveActionIFrames ai:
+                        if (ai.IntraActionStartFrame != newStart) { ai.IntraActionStartFrame = newStart; anyUpdated = true; }
+                        if (ai.IntraActionEndFrame != newEnd) { ai.IntraActionEndFrame = newEnd; anyUpdated = true; }
+                        break;
+
+                    default:
+                        // If the object implements the interface but lacks writable members accessible here,
+                        // we'll rely on reapplying via tm.Setter below (for value-types or custom hosts).
+                        break;
+                }
+            }
+
+            if (anyUpdated)
+            {
+                var type = windowInstance.GetType();
+                if (type.IsValueType)
+                {
+                    if (tm.Setter == null)
+                    {
+                        return false;
+                    }
+
+                    tm.Setter(target, windowInstance);
+                }
+                return true;
+            }
+
+            if (tm.Setter != null)
+            {
+                // Reapply the existing instance via setter in case the host requires it
+                tm.Setter(target, windowInstance);
+                return true;
+            }
+
+            return false;
+        }
+
+        // TrySetIntMember/TryGetIntMember removed: providers should prefer interface access and
+        // known concrete types; serialized fallback is still handled above where required.
     }
 }
 
