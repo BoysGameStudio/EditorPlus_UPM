@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Linq;
 using UnityEngine;
 using UnityEditor;
 using Quantum;
@@ -40,322 +41,151 @@ namespace EditorPlus.AnimationPreview
         {
             if (target == null) return Array.Empty<TrackMember>();
             var type = target.GetType();
+            // If no providers were registered yet (possible during domain reload ordering), ensure registration
+            if (s_Providers.Count == 0)
+            {
+                try { AutoRegisterProviders(); } catch { }
+            }
+
             if (!TimelineContext.TrackMembersCache.TryGetValue(type, out var cached))
             {
-                // Prefer typed descriptors for known Quantum types to avoid reflection into simulation types.
-                cached = BuildTrackMembersForType_TypedFirst(type) ?? BuildTrackMembersForType(type);
+                // Use registered providers to build TrackMembers. Providers are responsible for
+                // attribute-driven reflection or typed logic. If no provider handles the type, return empty.
+                var beforeProviders = s_Providers.Count;
+                try { UnityEngine.Debug.Log($"[TrackRenderer] Building TrackMembers for type {type.Name}, providers={beforeProviders}"); } catch { }
+                cached = BuildTrackMembersForType_TypedFirst(type) ?? Array.Empty<TrackMember>();
+                try { UnityEngine.Debug.Log($"[TrackRenderer] Built {cached.Length} TrackMembers for {type.Name}"); } catch { }
                 TimelineContext.TrackMembersCache[type] = cached;
             }
             return cached;
         }
 
-        // Try to build track members using explicit typed descriptors for known Quantum/Simulation types.
-        // Returns null if no typed descriptor is available for the requested type.
+        // Try to build track members using registered providers.
+        // For each member that has an AnimationEventAttribute, call providers in order and accept the
+        // first TrackMember produced. Returns null if no members were produced.
         private static TrackMember[] BuildTrackMembersForType_TypedFirst(Type type)
         {
             if (type == null) return null;
-
-            // ActiveActionData explicit mapping
-            if (type == typeof(ActiveActionData) || typeof(ActiveActionData).IsAssignableFrom(type))
-            {
-                // Build explicit TrackMember array matching the AnimationEventAttribute annotations in source.
-                var list = new List<TrackMember>();
-
-                // MoveInterruptionLockEndFrame -> int MoveInterruptionLockEndFrame
-                list.Add(new TrackMember
-                {
-                    Member = null,
-                    Label = "Move Lock End",
-                    ValueType = typeof(int),
-                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#4BA5E8", AnimationPreviewDrawer.DefaultColorFor(typeof(int))),
-                    Getter = owner => {
-                        var a = owner as UnityEngine.Object;
-                        // Owner is expected to be a UnityEngine.Object wrapper for ActiveActionData serialized asset
-                        // Use serialized property fallback in the editor drawer if instance access fails.
-                        var asObj = owner as UnityEngine.Object;
-                        if (asObj == null) return 0;
-                        var so = new SerializedObject(asObj);
-                        var prop = so.FindProperty("MoveInterruptionLockEndFrame");
-                        if (prop != null) return prop.intValue;
-                        return 0;
-                    },
-                    Setter = (owner, value) => {
-                        var asObj = owner as UnityEngine.Object;
-                        if (asObj == null) return;
-                        var so = new SerializedObject(asObj);
-                        var prop = so.FindProperty("MoveInterruptionLockEndFrame");
-                        if (prop != null) { prop.intValue = (int)value; so.ApplyModifiedProperties(); }
-                    },
-                    Order = -2
-                });
-
-                // ActionMovementStartFrame
-                list.Add(new TrackMember
-                {
-                    Member = null,
-                    Label = "Action Move Start Frame",
-                    ValueType = typeof(int),
-                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#4BA5E8", AnimationPreviewDrawer.DefaultColorFor(typeof(int))),
-                    Getter = owner => {
-                        var asObj = owner as UnityEngine.Object;
-                        if (asObj == null) return 0;
-                        var so = new SerializedObject(asObj);
-                        var prop = so.FindProperty("ActionMovementStartFrame");
-                        if (prop != null) return prop.intValue;
-                        return 0;
-                    },
-                    Setter = (owner, value) => {
-                        var asObj = owner as UnityEngine.Object;
-                        if (asObj == null) return;
-                        var so = new SerializedObject(asObj);
-                        var prop = so.FindProperty("ActionMovementStartFrame");
-                        if (prop != null) { prop.intValue = (int)value; so.ApplyModifiedProperties(); }
-                    },
-                    Order = 0
-                });
-
-                // NonHitLockableFrames (int[])
-                list.Add(new TrackMember
-                {
-                    Member = null,
-                    Label = "Non-Hit Lock Window",
-                    ValueType = typeof(int[]),
-                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#CB7AF3", AnimationPreviewDrawer.DefaultColorFor(typeof(int[]))),
-                    Getter = owner => {
-                        var asObj = owner as UnityEngine.Object;
-                        if (asObj == null) return Array.Empty<int>();
-                        var so = new SerializedObject(asObj);
-                        var prop = so.FindProperty("NonHitLockableFrames");
-                        if (prop != null && prop.isArray)
-                        {
-                            var arr = new List<int>();
-                            for (int i = 0; i < prop.arraySize; i++) arr.Add(prop.GetArrayElementAtIndex(i).intValue);
-                            return arr.ToArray();
-                        }
-                        return Array.Empty<int>();
-                    },
-                    Setter = (owner, value) => {
-                        var asObj = owner as UnityEngine.Object;
-                        if (asObj == null) return;
-                        var so = new SerializedObject(asObj);
-                        var prop = so.FindProperty("NonHitLockableFrames");
-                        if (prop != null && prop.isArray)
-                        {
-                            var arr = value as int[] ?? Array.Empty<int>();
-                            prop.arraySize = arr.Length;
-                            for (int i = 0; i < arr.Length; i++) prop.GetArrayElementAtIndex(i).intValue = arr[i];
-                            so.ApplyModifiedProperties();
-                        }
-                    },
-                    Order = 1
-                });
-
-                // IFrames (ActiveActionIFrames) -> treat as affect window
-                list.Add(new TrackMember
-                {
-                    Member = null,
-                    Label = "I-Frames",
-                    ValueType = typeof(ActiveActionIFrames),
-                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#82E0AA", AnimationPreviewDrawer.DefaultColorFor(typeof(ActiveActionIFrames))),
-                    Getter = owner => {
-                        var asObj = owner as UnityEngine.Object;
-                        if (asObj == null) return null;
-                        var so = new SerializedObject(asObj);
-                        var prop = so.FindProperty("IFrames");
-                        if (prop != null) return prop; // pass SerializedProperty for drawer's CreateAffectWindowBinding support
-                        return null;
-                    },
-                    Setter = null,
-                    Order = 2
-                });
-
-                // AffectWindow
-                list.Add(new TrackMember
-                {
-                    Member = null,
-                    Label = "Affect Window",
-                    ValueType = typeof(ActiveActionAffectWindow),
-                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#F5B041", AnimationPreviewDrawer.DefaultColorFor(typeof(ActiveActionAffectWindow))),
-                    Getter = owner => {
-                        var asObj = owner as UnityEngine.Object;
-                        if (asObj == null) return null;
-                        var so = new SerializedObject(asObj);
-                        var prop = so.FindProperty("AffectWindow");
-                        if (prop != null) return prop;
-                        return null;
-                    },
-                    Setter = null,
-                    Order = 3
-                });
-
-                return list.ToArray();
-            }
-
-            // PlayerDashActionData: Dash End Frame
-            if (type == typeof(PlayerDashActionData) || typeof(PlayerDashActionData).IsAssignableFrom(type))
-            {
-                var member = new TrackMember
-                {
-                    Member = null,
-                    Label = "Dash End Frame",
-                    ValueType = typeof(int),
-                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#FF8C5A", AnimationPreviewDrawer.DefaultColorFor(typeof(int))),
-                    Getter = owner => {
-                        var asObj = owner as UnityEngine.Object;
-                        if (asObj == null) return 0;
-                        var so = new SerializedObject(asObj);
-                        var prop = so.FindProperty("DashEndFrame") ?? so.FindProperty("DashEndFrame");
-                        if (prop != null) return prop.intValue;
-                        // fallback to common name 'DashEndFrame' or 'Dash End Frame' is handled by attribute label
-                        return 0;
-                    },
-                    Setter = (owner, value) => {
-                        var asObj = owner as UnityEngine.Object;
-                        if (asObj == null) return;
-                        var so = new SerializedObject(asObj);
-                        var prop = so.FindProperty("DashEndFrame");
-                        if (prop != null) { prop.intValue = (int)value; so.ApplyModifiedProperties(); }
-                    },
-                    Order = -1
-                };
-                return new[] { member };
-            }
-
-            // AttackActionData typed mapping (no string-based type/member checks)
-            if (type == typeof(AttackActionData) || typeof(AttackActionData).IsAssignableFrom(type))
-            {
-                var list = new List<TrackMember>();
-
-                list.Add(new TrackMember
-                {
-                    Member = null,
-                    Label = "Hit Frames",
-                    ValueType = typeof(HitFrame[]),
-                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#FF5555", AnimationPreviewDrawer.DefaultColorFor(typeof(HitFrame[]))),
-                    Getter = owner => {
-                        if (owner is AttackActionData attack) return attack.hitFrames;
-                        // also accept UnityEngine.Object that wraps a ScriptableObject instance
-                        if (owner is UnityEngine.Object uo)
-                        {
-                            var inst = uo as AttackActionData;
-                            if (inst != null) return inst.hitFrames;
-                        }
-                        return null;
-                    },
-                    Setter = null,
-                    Order = 100
-                });
-
-                list.Add(new TrackMember
-                {
-                    Member = null,
-                    Label = "Projectile Frames",
-                    ValueType = typeof(ProjectileFrame[]),
-                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#FFAA55", AnimationPreviewDrawer.DefaultColorFor(typeof(ProjectileFrame[]))),
-                    Getter = owner => {
-                        if (owner is AttackActionData attack) return attack.projectileFrames;
-                        if (owner is UnityEngine.Object uo)
-                        {
-                            var inst = uo as AttackActionData;
-                            if (inst != null) return inst.projectileFrames;
-                        }
-                        return null;
-                    },
-                    Setter = null,
-                    Order = 101
-                });
-
-                list.Add(new TrackMember
-                {
-                    Member = null,
-                    Label = "Child Actor Frames",
-                    ValueType = typeof(ChildActorFrame[]),
-                    Color = AnimationPreviewDrawer.ParseHexOrDefault("#FF77CC", AnimationPreviewDrawer.DefaultColorFor(typeof(ChildActorFrame[]))),
-                    Getter = owner => {
-                        if (owner is AttackActionData attack) return attack.childActorFrames;
-                        if (owner is UnityEngine.Object uo)
-                        {
-                            var inst = uo as AttackActionData;
-                            if (inst != null) return inst.childActorFrames;
-                        }
-                        return null;
-                    },
-                    Setter = null,
-                    Order = 102
-                });
-
-                return list.ToArray();
-            }
-
-            return null;
-        }
-
-        public static TrackMember[] BuildTrackMembersForType(Type type)
-        {
             var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            var members = type.GetMembers(flags);
-            var entries = new List<(TrackMember Track, int DeclarationIndex)>(members.Length);
-            int declarationIndex = 0;
+            var result = new List<TrackMember>();
 
-            foreach (var member in members)
+            foreach (var member in type.GetMembers(flags))
             {
-                var attribute = member.GetCustomAttribute<AnimationEventAttribute>();
-                if (attribute == null) continue;
+                // find any attribute instance named AnimationEventAttribute (assembly mismatches may exist)
+                var attrs = member.GetCustomAttributes(false);
+                object animAttr = null;
+                foreach (var a in attrs) if (a != null && a.GetType().Name == "AnimationEventAttribute") { animAttr = a; break; }
+                if (animAttr == null) continue;
 
-                Type valueType;
-                Func<UnityEngine.Object, object> getter = null;
-                Action<UnityEngine.Object, object> setter = null;
-
-                if (member is FieldInfo field)
+                // For this attributed member, ask each provider to build a single TrackMember
+                foreach (var p in s_Providers)
                 {
-                    valueType = field.FieldType;
-                    getter = owner => field.GetValue(owner);
-                    if (!field.IsInitOnly) setter = (owner, value) => field.SetValue(owner, value);
+                    try
+                    {
+                        if (!p.CanHandle(type)) continue;
+                        var tmOpt = p.Build(member, animAttr);
+                        if (tmOpt.HasValue)
+                        {
+                            result.Add(tmOpt.Value);
+                            break; // move to next member once one provider handled it
+                        }
+                    }
+                    catch { }
                 }
-                else if (member is PropertyInfo property)
-                {
-                    valueType = property.PropertyType;
-                    if (property.CanRead) getter = owner => property.GetValue(owner, null);
-                    if (property.CanWrite) setter = (owner, value) => property.SetValue(owner, value, null);
-                }
-                else
-                {
-                    continue;
-                }
-
-                if (getter == null) continue;
-
-                var label = string.IsNullOrEmpty(attribute.Label) ? member.Name : attribute.Label;
-                var color = AnimationPreviewDrawer.ParseHexOrDefault(attribute.ColorHex, AnimationPreviewDrawer.DefaultColorFor(valueType));
-
-                var trackMember = new TrackMember
-                {
-                    Member = member,
-                    Label = label,
-                    ValueType = valueType,
-                    Color = color,
-                    Getter = getter,
-                    Setter = setter,
-                    Order = attribute.Order
-                };
-
-                entries.Add((trackMember, declarationIndex));
-                declarationIndex++;
             }
 
-            if (entries.Count == 0) return Array.Empty<TrackMember>();
-
-            entries.Sort((a, b) =>
-            {
-                int orderComparison = a.Track.Order.CompareTo(b.Track.Order);
-                if (orderComparison != 0) return orderComparison;
-                return a.DeclarationIndex.CompareTo(b.DeclarationIndex);
-            });
-
-            var result = new TrackMember[entries.Count];
-            for (int i = 0; i < entries.Count; i++) result[i] = entries[i].Track;
-            return result;
+            if (result.Count == 0) return null;
+            result.Sort((a, b) => a.Order.CompareTo(b.Order));
+            return result.ToArray();
         }
+
+
+        // Public provider interface so external editor extensions can register track providers.
+        public interface ITrackProvider
+        {
+            bool CanHandle(Type t);
+            // Build a TrackMember for a single member (or return null if this provider doesn't handle it)
+            TrackMember? Build(System.Reflection.MemberInfo member, object animationEventAttributeInstance);
+        }
+
+        // Provider registry for open-closed extensibility. Providers should register themselves
+        // via TrackRenderer.RegisterTrackProvider (e.g. Providers/*.cs files).
+        private static readonly List<ITrackProvider> s_Providers = new List<ITrackProvider>();
+
+        /// <summary>
+        /// Register a custom track provider. Newly registered providers take precedence over built-in providers.
+        /// </summary>
+        public static void RegisterTrackProvider(ITrackProvider provider)
+        {
+            if (provider == null) return;
+            // Avoid duplicate provider registration by concrete type
+            var pt = provider.GetType();
+            if (s_Providers.Any(p => p.GetType() == pt)) return;
+            s_Providers.Insert(0, provider);
+            // Invalidate cached TrackMember lists so newly-registered providers can take effect
+            try { TimelineContext.TrackMembersCache.Clear(); } catch { }
+        }
+
+        /// <summary>
+        /// Returns a snapshot of currently-registered providers (for diagnostics).
+        /// </summary>
+        public static ITrackProvider[] GetRegisteredProviders()
+        {
+            return s_Providers.ToArray();
+        }
+
+        /// <summary>
+        /// Ensure providers are registered now (invokes auto-registration path).
+        /// </summary>
+        public static void EnsureProvidersRegistered()
+        {
+            if (s_Providers.Count == 0) AutoRegisterProviders();
+        }
+
+        // Ensure providers are registered at editor load (static constructors in provider classes may not run).
+        [InitializeOnLoadMethod]
+        private static void AutoRegisterProviders()
+        {
+            try
+            {
+                var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+                foreach (var asm in assemblies)
+                {
+                    Type[] types;
+                    try { types = asm.GetTypes(); } catch { continue; }
+                    foreach (var t in types)
+                    {
+                        if (t.IsAbstract || t.IsInterface) continue;
+                        if (!typeof(ITrackProvider).IsAssignableFrom(t)) continue;
+                        // Skip the nested interface type itself
+                        if (t == typeof(ITrackProvider)) continue;
+                        // Skip anonymous / compiler-generated types
+                        if (t.Name.StartsWith("<")) continue;
+
+                        try
+                        {
+                            var inst = Activator.CreateInstance(t) as ITrackProvider;
+                            if (inst != null) RegisterTrackProvider(inst);
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+
+            // Log provider count after a short delay so Domain Reload messages don't swallow it
+            try
+            {
+                UnityEditor.EditorApplication.delayCall += () => {
+                    try { UnityEngine.Debug.Log($"[TrackRenderer] Providers registered: {s_Providers.Count}"); } catch { }
+                };
+            }
+            catch { }
+        }
+
+        // NOTE: The reflection-based BuildTrackMembersForType was removed so that attribute-driven
+        // track creation is implemented by per-type providers in the Providers/ folder. This
+        // keeps TrackRenderer free of reflection and allows each data type to own its Track logic.
 
         private static void DrawSingleTrack(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
         {
