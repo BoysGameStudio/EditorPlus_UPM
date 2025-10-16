@@ -3,7 +3,9 @@
     "rootNamespace": "EditorPlus",
     "references": [
         "GUID:3def463f8b9d83142add00d17f3be335",
-        "Quantum.Simulation"
+        "Quantum.Simulation",
+        "Quantum.Unity",
+        "Quantum.Unity.Editor"
     ],
     "includePlatforms": [
         "Editor"

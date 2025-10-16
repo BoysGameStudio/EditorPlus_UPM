@@ -65,8 +65,8 @@ namespace EditorPlus.AnimationPreview
                             if (hf.shape != null)
                             {
                                 var ctx = ResolvePreviewRoot(parentTarget);
-                                // hf.shape is a Shape3DConfig in Quantum packages; draw via reflection-free path if possible
-                                DrawShape3DConfigPreviewFromReflection(hf.shape, ctx);
+                                // hf.shape is a Shape3DConfig in Quantum packages; draw using direct API
+                                DrawShape3DConfigPreview(hf.shape, ctx);
                             }
                             else
                             {
@@ -81,119 +81,9 @@ namespace EditorPlus.AnimationPreview
                 }
                 catch { /* typed path may fail in some editor contexts; fallback to reflection below */ }
 
-                // 3) Reflection fallback for unknown POCO/Odin types - conservative and scoped
-                try
-                {
-                    var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                    Array arr = null;
-
-                    var t = parentTarget.GetType();
-                    var fi = t.GetField("hitFrames", flags);
-                    if (fi != null) arr = fi.GetValue(parentTarget) as Array;
-                    else
-                    {
-                        var pi = t.GetProperty("hitFrames", flags);
-                        if (pi != null && pi.CanRead) arr = pi.GetValue(parentTarget, null) as Array;
-                    }
-
-                    if (arr == null)
-                    {
-                        // scan fields/properties for an array with elements that have 'frame'
-                        foreach (var field in t.GetFields(flags))
-                        {
-                            try
-                            {
-                                var val = field.GetValue(parentTarget);
-                                if (val is Array a)
-                                {
-                                    var et = a.GetType().GetElementType();
-                                    if (et != null && (et.GetField("frame", flags) != null || et.GetProperty("frame", flags) != null))
-                                    {
-                                        arr = a; break;
-                                    }
-                                }
-                            }
-                            catch { }
-                        }
-
-                        if (arr == null)
-                        {
-                            foreach (var pinfo in t.GetProperties(flags))
-                            {
-                                try
-                                {
-                                    if (!pinfo.CanRead) continue;
-                                    var val = pinfo.GetValue(parentTarget, null);
-                                    if (val is Array a)
-                                    {
-                                        var et = a.GetType().GetElementType();
-                                        if (et != null && (et.GetField("frame", flags) != null || et.GetProperty("frame", flags) != null))
-                                        {
-                                            arr = a; break;
-                                        }
-                                    }
-                                }
-                                catch { }
-                            }
-                        }
-                    }
-
-                    if (arr != null)
-                    {
-                        for (int i = 0; i < arr.Length; i++)
-                        {
-                            var elem = arr.GetValue(i);
-                            if (elem == null) continue;
-                            int ef = -1;
-
-                            var fField = elem.GetType().GetField("frame", flags);
-                            if (fField != null)
-                            {
-                                var fv = fField.GetValue(elem);
-                                if (fv is int iv) ef = iv;
-                                else if (fv is long lv) ef = (int)lv;
-                                else if (fv != null) { try { ef = Convert.ToInt32(fv); } catch { ef = -1; } }
-                            }
-                            else
-                            {
-                                var fProp = elem.GetType().GetProperty("frame", flags);
-                                if (fProp != null)
-                                {
-                                    var pv = fProp.GetValue(elem, null);
-                                    if (pv is int piv) ef = piv;
-                                    else if (pv is long plv) ef = (int)plv;
-                                    else if (pv != null) { try { ef = Convert.ToInt32(pv); } catch { ef = -1; } }
-                                }
-                            }
-
-                            if (ef != frame) continue;
-
-                            object shapeObj = null;
-                            var shapeField = elem.GetType().GetField("shape", flags);
-                            if (shapeField != null) shapeObj = shapeField.GetValue(elem);
-                            else
-                            {
-                                var shapeProp = elem.GetType().GetProperty("shape", flags);
-                                if (shapeProp != null && shapeProp.CanRead) shapeObj = shapeProp.GetValue(elem, null);
-                            }
-
-                            if (shapeObj != null)
-                            {
-                                var ctx = ResolvePreviewRoot(parentTarget);
-                                DrawShape3DConfigPreviewFromReflection(shapeObj, ctx);
-                            }
-                            else
-                            {
-                                Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
-                                Handles.DrawWireDisc(Vector3.zero, Vector3.up, 0.5f);
-                                Handles.Label(Vector3.up * 0.6f, "HitFrame");
-                            }
-
-                            return;
-                        }
-                    }
-                }
-                catch { }
+                // 3) No reflection fallback: AnimationPreview is project-specific and should reference
+                // known Quantum/Project types directly. If we couldn't draw via SerializedProperty or
+                // typed-access above, give up gracefully.
             }
             catch { }
         }
@@ -305,6 +195,115 @@ namespace EditorPlus.AnimationPreview
                         break;
                     }
                 }
+            }
+            catch { }
+        }
+
+        // Direct drawer for Quantum.Shape3DConfig (no reflection)
+        public static void DrawShape3DConfigPreview(Shape3DConfig config, GameObject context)
+        {
+            try
+            {
+                if (config.Equals(default(Shape3DConfig))) return;
+
+                Vector3 pos = Vector3.zero;
+                Quaternion rot = Quaternion.identity;
+                if (context != null)
+                {
+                    pos = context.transform.position;
+                    rot = context.transform.rotation;
+                }
+
+                // Prefer Quantum's runtime gizmo if available (provides the most accurate visuals).
+#if QUANTUM_UNITY || QUANTUM_UPM || QUANTUM_ENABLE_PHYSICS3D
+                var entry = new Quantum.QuantumGizmoEntry(new Color(1f, 0.25f, 0.25f, 0.6f)) { Enabled = true };
+                Quantum.QuantumUnityRuntime.DrawShape3DConfigGizmo(config, pos, rot, entry);
+#else
+                // Fallback: draw a conservative approximation using Shape3DConfig fields directly
+                // (non-reflective, deterministic, and safe when Quantum gizmo helpers aren't available).
+                Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
+
+                try {
+                    var shapeType = (int)config.ShapeType;
+
+
+                    Vector3 localPos = Vector3.zero;
+                    try { TryInvokeToUnityVector3((object)config.PositionOffset, out localPos); } catch { localPos = Vector3.zero; }
+                    Quaternion localRot = Quaternion.identity;
+                    try {
+                        // RotationOffset may be an FPVector3 euler or a Quaternion-like struct. Try to convert.
+                        if (TryInvokeToUnityVector3((object)config.RotationOffset, out var rotVec)) {
+                            localRot = Quaternion.Euler(rotVec);
+                        } else {
+                            // Try numeric/quaternion fields via reflection helper
+                            if (TryGetQuaternionFromReflected((object)config, "RotationOffset", out var q)) localRot = q;
+                        }
+                    } catch { localRot = Quaternion.identity; }
+
+                    var worldPos = pos + (context != null ? context.transform.TransformVector(localPos) : localPos);
+                    var worldRot = rot * localRot;
+
+                    switch (shapeType)
+                    {
+                        case 1: // Sphere
+                        {
+                            float r = 0.5f;
+                            try { if (!TryConvertNumeric((object)config.SphereRadius, out r)) r = 0.5f; r = Mathf.Max(0.001f, r); } catch { r = 0.5f; }
+                            Handles.DrawWireDisc(worldPos, worldRot * Vector3.up, r);
+                            Handles.DrawWireDisc(worldPos, worldRot * Vector3.right, r);
+                            Handles.DrawWireDisc(worldPos, worldRot * Vector3.forward, r);
+                            Handles.Label(worldPos + Vector3.up * (r + 0.1f), "HitFrame(Sphere)");
+                            break;
+                        }
+                        case 2: // Box
+                        {
+                            Vector3 ext = Vector3.one * 0.5f;
+                            try { TryInvokeToUnityVector3((object)config.BoxExtents, out ext); } catch { ext = Vector3.one * 0.5f; }
+                            var verts = new Vector3[8];
+                            var half = ext;
+                            verts[0] = worldPos + worldRot * new Vector3(-half.x, -half.y, -half.z);
+                            verts[1] = worldPos + worldRot * new Vector3(half.x, -half.y, -half.z);
+                            verts[2] = worldPos + worldRot * new Vector3(half.x, -half.y, half.z);
+                            verts[3] = worldPos + worldRot * new Vector3(-half.x, -half.y, half.z);
+                            verts[4] = worldPos + worldRot * new Vector3(-half.x, half.y, -half.z);
+                            verts[5] = worldPos + worldRot * new Vector3(half.x, half.y, -half.z);
+                            verts[6] = worldPos + worldRot * new Vector3(half.x, half.y, half.z);
+                            verts[7] = worldPos + worldRot * new Vector3(-half.x, half.y, half.z);
+
+                            Handles.DrawLine(verts[0], verts[1]); Handles.DrawLine(verts[1], verts[2]); Handles.DrawLine(verts[2], verts[3]); Handles.DrawLine(verts[3], verts[0]);
+                            Handles.DrawLine(verts[4], verts[5]); Handles.DrawLine(verts[5], verts[6]); Handles.DrawLine(verts[6], verts[7]); Handles.DrawLine(verts[7], verts[4]);
+                            Handles.DrawLine(verts[0], verts[4]); Handles.DrawLine(verts[1], verts[5]); Handles.DrawLine(verts[2], verts[6]); Handles.DrawLine(verts[3], verts[7]);
+                            Handles.Label(worldPos + worldRot * Vector3.up * (half.y + 0.1f), "HitFrame(Box)");
+                            break;
+                        }
+                        case 3: // Capsule
+                        {
+                            float radius = 0.25f; float height = 1f;
+                            try { if (!TryConvertNumeric((object)config.CapsuleRadius, out radius)) radius = 0.25f; radius = Mathf.Max(0.001f, radius); } catch { radius = 0.25f; }
+                            try { if (!TryConvertNumeric((object)config.CapsuleHeight, out height)) height = 1f; height = Mathf.Max(0f, height); } catch { height = 1f; }
+                            float half = Mathf.Max(0f, (height - 2f * radius) * 0.5f);
+                            Vector3 up = worldRot * Vector3.up;
+                            var top = worldPos + up * half;
+                            var bot = worldPos - up * half;
+                            Handles.DrawWireDisc(top, worldRot * Vector3.up, radius);
+                            Handles.DrawWireDisc(bot, worldRot * Vector3.up, radius);
+                            Handles.DrawLine(top + worldRot * Vector3.right * radius, bot + worldRot * Vector3.right * radius);
+                            Handles.DrawLine(top - worldRot * Vector3.right * radius, bot - worldRot * Vector3.right * radius);
+                            Handles.DrawLine(top + worldRot * Vector3.forward * radius, bot + worldRot * Vector3.forward * radius);
+                            Handles.DrawLine(top - worldRot * Vector3.forward * radius, bot - worldRot * Vector3.forward * radius);
+                            Handles.Label(worldPos + up * (half + radius + 0.05f), "HitFrame(Capsule)");
+                            break;
+                        }
+                        default:
+                        {
+                            Handles.DrawWireDisc(worldPos, Vector3.up, 0.5f);
+                            Handles.Label(worldPos + Vector3.up * 0.6f, "HitFrame");
+                            break;
+                        }
+                    }
+                }
+                catch { /* conservative fallback failed, swallow to avoid breaking editor */ }
+#endif
             }
             catch { }
         }
