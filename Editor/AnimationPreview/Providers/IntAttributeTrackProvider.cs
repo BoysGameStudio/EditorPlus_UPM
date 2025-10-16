@@ -11,6 +11,8 @@ namespace EditorPlus.AnimationPreview
     internal class IntAttributeTrackProvider : TrackRenderer.ITrackProvider, EditorPlus.AnimationPreview.TrackRenderer.ICustomTrackDrawer
     {
         // Provider will be auto-registered via TrackRenderer.AutoRegisterProviders
+        // Provider-wide default color for int-like members.
+        private readonly Color DefaultColor = new Color(0.98f, 0.62f, 0.23f);
 
         public bool CanHandle(Type t)
         {
@@ -59,23 +61,10 @@ namespace EditorPlus.AnimationPreview
             string label = member.Name;
             string colorHex = null;
             int order = 0;
-            try
-            {
-                var atype = animationEventAttributeInstance.GetType();
-                var pLabel = atype.GetProperty("Label"); if (pLabel != null) label = (pLabel.GetValue(animationEventAttributeInstance) as string) ?? label;
-                var pColor = atype.GetProperty("ColorHex"); if (pColor != null) colorHex = pColor.GetValue(animationEventAttributeInstance) as string;
-                var pOrder = atype.GetProperty("Order"); if (pOrder != null) order = (int)(pOrder.GetValue(animationEventAttributeInstance) ?? 0);
-            }
-            catch { }
+            ProviderUtils.ExtractAttributeData(animationEventAttributeInstance, ref label, ref colorHex, ref order);
 
-            // Compute provider-local default color (moved from AnimationPreviewDrawer.DefaultColorFor)
-            Color defaultColor;
-            if (valueType == typeof(int)) defaultColor = new Color(0.98f, 0.62f, 0.23f);
-            else if (valueType == typeof(int[])) defaultColor = new Color(0.39f, 0.75f, 0.96f);
-            else if (AnimationPreviewDrawer.HasAffectWindowPattern(valueType)) defaultColor = new Color(0.5f, 0.9f, 0.5f);
-            else defaultColor = new Color(0.8f, 0.8f, 0.8f);
-
-            var color = AnimationPreviewDrawer.ParseHexOrDefault(colorHex, defaultColor);
+            // Use provider-level default color (int provider targets int members).
+            var color = AnimationPreviewDrawer.ParseHexOrDefault(colorHex, DefaultColor);
             var trackMember = new TrackMember
             {
                 Member = member,

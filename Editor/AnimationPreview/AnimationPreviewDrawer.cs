@@ -786,21 +786,6 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         return fallback;
     }
 
-    internal static bool HasAffectWindowPattern(Type t)
-    {
-        if (t == null) return false;
-        var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
-        bool hasStart = t.GetProperty("IntraActionStartFrame", flags, null, typeof(int), Type.EmptyTypes, null) != null
-                        || t.GetField("IntraActionStartFrame", flags) != null
-                        || t.GetField("_intraActionStartFrame", flags) != null
-                        || t.GetField("m_IntraActionStartFrame", flags) != null;
-        bool hasEnd = t.GetProperty("IntraActionEndFrame", flags, null, typeof(int), Type.EmptyTypes, null) != null
-                        || t.GetField("IntraActionEndFrame", flags) != null
-                        || t.GetField("_intraActionEndFrame", flags) != null
-                        || t.GetField("m_IntraActionEndFrame", flags) != null;
-        return hasStart && hasEnd;
-    }
-
     // Window drag state, ActiveActionIntegration and TimelineState moved to partial files.
 
     // Seeking and cursor logic now lives in CursorRenderer / InputHandler; hitframe
@@ -817,77 +802,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         return color;
     }
 
-    // Localized helpers to avoid referencing TimelineUtils from this file.
-    internal static int[] ReadFrameArrayLocal(UnityEngine.Object owner, MemberInfo member)
-    {
-        if (owner == null || member == null) return Array.Empty<int>();
-
-        try
-        {
-            Func<object> getter = null;
-            if (member is FieldInfo fi) getter = () => fi.GetValue(owner);
-            else if (member is PropertyInfo pi && pi.CanRead) getter = () => pi.GetValue(owner, null);
-
-            var arrObj = getter != null ? getter() as Array : null;
-            if (arrObj != null)
-            {
-                var list = new System.Collections.Generic.List<int>(arrObj.Length);
-                for (int i = 0; i < arrObj.Length; i++)
-                {
-                    var elem = arrObj.GetValue(i);
-                    if (elem == null) continue;
-                    // Try reflection: look for 'frame' field or property
-                    int ef = -1;
-                    try
-                    {
-                        var et = elem.GetType();
-                        var fiElem = et.GetField("frame", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
-                        if (fiElem != null)
-                        {
-                            var v = fiElem.GetValue(elem);
-                            if (v is int iv) ef = iv;
-                        }
-                        else
-                        {
-                            var piElem = et.GetProperty("frame", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
-                            if (piElem != null && piElem.CanRead)
-                            {
-                                var v = piElem.GetValue(elem, null);
-                                if (v is int iv2) ef = iv2;
-                            }
-                        }
-                    }
-                    catch { }
-
-                    if (ef >= 0) list.Add(ef);
-                }
-                return list.ToArray();
-            }
-        }
-        catch { }
-
-        // SerializedProperty fallback
-        try
-        {
-            var so = new SerializedObject(owner);
-            var prop = so.FindProperty(member.Name);
-            if (prop != null && prop.isArray && prop.arraySize > 0)
-            {
-                var tmp = new System.Collections.Generic.List<int>();
-                for (int i = 0; i < prop.arraySize; i++)
-                {
-                    var elem = prop.GetArrayElementAtIndex(i);
-                    if (elem == null) continue;
-                    var frameProp = elem.FindPropertyRelative("frame");
-                    if (frameProp != null) tmp.Add(frameProp.intValue);
-                }
-                return tmp.ToArray();
-            }
-        }
-        catch { }
-
-        return Array.Empty<int>();
-    }
+    // ReadFrameArrayLocal moved to FrameArrayTrackProvider - the provider owns POCO-frame extraction
 
     // Removed typed-only fast path helper. Reflection/SerializedProperty are used instead.
 }

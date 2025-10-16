@@ -11,6 +11,10 @@ namespace EditorPlus.AnimationPreview
     // Provider for members that are arrays of frame-like POCOs (HitFrame[], ProjectileFrame[], ChildActorFrame[], etc.)
     internal class FrameArrayTrackProvider : TrackRenderer.ITrackProvider, TrackRenderer.ICustomTrackDrawer
     {
+        // Provider will be auto-registered via TrackRenderer.AutoRegisterProviders
+        // Provider-wide default color for frame-array members.
+        private readonly Color DefaultColor = new Color(0.8f, 0.8f, 0.8f);
+
         public bool CanHandle(Type t)
         {
             if (t == null) return false;
@@ -58,23 +62,10 @@ namespace EditorPlus.AnimationPreview
             string label = member.Name;
             string colorHex = null;
             int order = 0;
-            try
-            {
-                var atype = animationEventAttributeInstance.GetType();
-                var pLabel = atype.GetProperty("Label"); if (pLabel != null) label = (pLabel.GetValue(animationEventAttributeInstance) as string) ?? label;
-                var pColor = atype.GetProperty("ColorHex"); if (pColor != null) colorHex = pColor.GetValue(animationEventAttributeInstance) as string;
-                var pOrder = atype.GetProperty("Order"); if (pOrder != null) order = (int)(pOrder.GetValue(animationEventAttributeInstance) ?? 0);
-            }
-            catch { }
+            ProviderUtils.ExtractAttributeData(animationEventAttributeInstance, ref label, ref colorHex, ref order);
 
-            // Compute provider-local default color (moved from AnimationPreviewDrawer.DefaultColorFor)
-            Color defaultColor;
-            if (valueType == typeof(int)) defaultColor = new Color(0.98f, 0.62f, 0.23f);
-            else if (valueType == typeof(int[])) defaultColor = new Color(0.39f, 0.75f, 0.96f);
-            else if (AnimationPreviewDrawer.HasAffectWindowPattern(valueType)) defaultColor = new Color(0.5f, 0.9f, 0.5f);
-            else defaultColor = new Color(0.8f, 0.8f, 0.8f);
-
-            var color = AnimationPreviewDrawer.ParseHexOrDefault(colorHex, defaultColor);
+            // Use provider-level default color (frame-array provider default is a neutral gray).
+            var color = AnimationPreviewDrawer.ParseHexOrDefault(colorHex, DefaultColor);
 
             var trackMember = new TrackMember
             {
@@ -206,7 +197,7 @@ namespace EditorPlus.AnimationPreview
                 bool drewFromSerialized = false;
                 try
                 {
-                    var frames2 = AnimationPreviewDrawer.ReadFrameArrayLocal(target, tm.Member);
+                    var frames2 = ReadFrameArrayLocal(target, tm.Member);
                     if (frames2 != null && frames2.Length > 0)
                     {
                         AnimationPreviewDrawer.DrawMarkers(target, tm, rect, st, frames2, tm.Color, TimelineContext.MarkerWidth, TimelineContext.ComputeControlSeed(target, tm), totalFrames, out int clickedIndex2, out bool context2, out int draggedIndex2, out int draggedFrame2);
@@ -225,6 +216,79 @@ namespace EditorPlus.AnimationPreview
                 }
             }
         }
+
+            // Localized copy of ReadFrameArrayLocal moved from AnimationPreviewDrawer so the
+            // frame-array provider owns its frame-extraction logic and doesn't depend on the drawer.
+            private static int[] ReadFrameArrayLocal(UnityEngine.Object owner, MemberInfo member)
+            {
+                if (owner == null || member == null) return Array.Empty<int>();
+
+                try
+                {
+                    Func<object> getter = null;
+                    if (member is FieldInfo fi) getter = () => fi.GetValue(owner);
+                    else if (member is PropertyInfo pi && pi.CanRead) getter = () => pi.GetValue(owner, null);
+
+                    var arrObj = getter != null ? getter() as Array : null;
+                    if (arrObj != null)
+                    {
+                        var list = new System.Collections.Generic.List<int>(arrObj.Length);
+                        for (int i = 0; i < arrObj.Length; i++)
+                        {
+                            var elem = arrObj.GetValue(i);
+                            if (elem == null) continue;
+                            // Try reflection: look for 'frame' field or property
+                            int ef = -1;
+                            try
+                            {
+                                var et = elem.GetType();
+                                var fiElem = et.GetField("frame", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
+                                if (fiElem != null)
+                                {
+                                    var v = fiElem.GetValue(elem);
+                                    if (v is int iv) ef = iv;
+                                }
+                                else
+                                {
+                                    var piElem = et.GetProperty("frame", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
+                                    if (piElem != null && piElem.CanRead)
+                                    {
+                                        var v = piElem.GetValue(elem, null);
+                                        if (v is int iv2) ef = iv2;
+                                    }
+                                }
+                            }
+                            catch { }
+
+                            if (ef >= 0) list.Add(ef);
+                        }
+                        return list.ToArray();
+                    }
+                }
+                catch { }
+
+                // SerializedProperty fallback
+                try
+                {
+                    var so = new SerializedObject(owner);
+                    var prop = so.FindProperty(member.Name);
+                    if (prop != null && prop.isArray && prop.arraySize > 0)
+                    {
+                        var tmp = new System.Collections.Generic.List<int>();
+                        for (int i = 0; i < prop.arraySize; i++)
+                        {
+                            var elem = prop.GetArrayElementAtIndex(i);
+                            if (elem == null) continue;
+                            var frameProp = elem.FindPropertyRelative("frame");
+                            if (frameProp != null) tmp.Add(frameProp.intValue);
+                        }
+                        return tmp.ToArray();
+                    }
+                }
+                catch { }
+
+                return Array.Empty<int>();
+            }
     }
 }
 
