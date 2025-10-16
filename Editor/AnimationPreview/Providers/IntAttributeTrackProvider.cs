@@ -8,13 +8,9 @@ using UnityEngine;
 namespace EditorPlus.AnimationPreview
 {
     // Builds TrackMember for int fields/properties marked with [AnimationEvent]
-    internal class IntAttributeTrackProvider : TrackRenderer.ITrackProvider
+    internal class IntAttributeTrackProvider : TrackRenderer.ITrackProvider, EditorPlus.AnimationPreview.TrackRenderer.ICustomTrackDrawer
     {
-        static IntAttributeTrackProvider()
-        {
-            // register early so it has precedence over generic handlers
-            TrackRenderer.RegisterTrackProvider(new IntAttributeTrackProvider());
-        }
+        // Provider will be auto-registered via TrackRenderer.AutoRegisterProviders
 
         public bool CanHandle(Type t)
         {
@@ -85,6 +81,21 @@ namespace EditorPlus.AnimationPreview
             };
 
             return trackMember;
+        }
+
+        public void Draw(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
+        {
+            EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.04f));
+            int val = (int)(tm.Getter?.Invoke(target) ?? 0);
+            AnimationPreviewDrawer.DrawSingleMarker(target, tm, rect, st, val, tm.Color, TimelineContext.MarkerWidth, TimelineContext.ComputeControlSeed(target, tm), totalFrames, out _, out bool context, out int draggedFrame);
+
+            if (draggedFrame != val && tm.Setter != null)
+            {
+                tm.Setter(target, draggedFrame);
+                EditorUtility.SetDirty(target);
+            }
+
+            if (context) AnimationPreviewDrawer.ShowReadOnlyContextMenu();
         }
     }
 }

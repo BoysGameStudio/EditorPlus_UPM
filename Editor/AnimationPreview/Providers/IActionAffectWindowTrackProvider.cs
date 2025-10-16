@@ -4,19 +4,16 @@ using System.Reflection;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using Sirenix.Utilities.Editor;
 
 namespace EditorPlus.AnimationPreview
 {
     /// <summary>
     /// Provider that builds TrackMember entries for members whose type implements IActionAffectWindow.
     /// </summary>
-    internal class IActionAffectWindowTrackProvider : TrackRenderer.ITrackProvider
+    internal class IActionAffectWindowTrackProvider : TrackRenderer.ITrackProvider, EditorPlus.AnimationPreview.TrackRenderer.ICustomTrackDrawer
     {
-        static IActionAffectWindowTrackProvider()
-        {
-            // Register so TrackRenderer will pick up this provider automatically
-            TrackRenderer.RegisterTrackProvider(new IActionAffectWindowTrackProvider());
-        }
+        // Provider will be auto-registered via TrackRenderer.AutoRegisterProviders
 
         public bool CanHandle(Type t)
         {
@@ -90,6 +87,31 @@ namespace EditorPlus.AnimationPreview
             };
 
             return trackMember;
+        }
+
+        public void Draw(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
+        {
+            // Affect window drawing (same as previous central logic)
+            var windowInstance = tm.Getter?.Invoke(target);
+            if (windowInstance != null)
+            {
+                var binding = AnimationPreviewDrawer.CreateAffectWindowBinding(target, tm, windowInstance, totalFrames);
+                AnimationPreviewDrawer.DrawWindowBinding(target, tm, rect, st, totalFrames, TimelineContext.ComputeControlSeed(target, tm), binding);
+
+                var evt = Event.current;
+                if (evt.type == EventType.ContextClick && rect.Contains(evt.mousePosition))
+                {
+                    AnimationPreviewDrawer.ShowReadOnlyContextMenu();
+                    evt.Use();
+                }
+            }
+            else
+            {
+                EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.02f));
+                var c = GUI.color; GUI.color = new Color(1, 1, 1, 0.5f);
+                GUI.Label(rect, "〈No Window Data〉", SirenixGUIStyles.MiniLabelCentered);
+                GUI.color = c;
+            }
         }
     }
 }

@@ -8,12 +8,9 @@ using UnityEngine;
 namespace EditorPlus.AnimationPreview
 {
     // Builds TrackMember for int[] fields/properties marked with [AnimationEvent]
-    internal class IntArrayAttributeTrackProvider : TrackRenderer.ITrackProvider
+    internal class IntArrayAttributeTrackProvider : TrackRenderer.ITrackProvider, EditorPlus.AnimationPreview.TrackRenderer.ICustomTrackDrawer
     {
-        static IntArrayAttributeTrackProvider()
-        {
-            TrackRenderer.RegisterTrackProvider(new IntArrayAttributeTrackProvider());
-        }
+        // Provider will be auto-registered via TrackRenderer.AutoRegisterProviders
 
         public bool CanHandle(Type t)
         {
@@ -83,6 +80,36 @@ namespace EditorPlus.AnimationPreview
             };
 
             return trackMember;
+        }
+
+        public void Draw(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
+        {
+            EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.04f));
+
+            var arr = (int[])(tm.Getter?.Invoke(target) ?? Array.Empty<int>());
+            if (arr == null) arr = Array.Empty<int>();
+
+            var controlSeed = TimelineContext.ComputeControlSeed(target, tm);
+
+            if (arr.Length == 2)
+            {
+                var binding = AnimationPreviewDrawer.CreateArrayWindowBinding(target, tm, arr, totalFrames);
+                AnimationPreviewDrawer.DrawWindowBinding(target, tm, rect, st, totalFrames, controlSeed, binding);
+            }
+            else
+            {
+                AnimationPreviewDrawer.DrawMarkers(target, tm, rect, st, arr, tm.Color, TimelineContext.MarkerWidth, controlSeed, totalFrames, out _, out bool context, out int draggedIndex, out int draggedFrame);
+
+                if (draggedIndex >= 0 && draggedIndex < arr.Length && draggedFrame != arr[draggedIndex] && tm.Setter != null)
+                {
+                    var newArr = (int[])arr.Clone();
+                    newArr[draggedIndex] = draggedFrame;
+                    tm.Setter(target, newArr);
+                    EditorUtility.SetDirty(target);
+                }
+
+                if (context) AnimationPreviewDrawer.ShowReadOnlyContextMenu();
+            }
         }
     }
 }

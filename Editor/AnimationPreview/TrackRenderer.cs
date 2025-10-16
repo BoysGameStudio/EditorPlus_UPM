@@ -86,7 +86,9 @@ namespace EditorPlus.AnimationPreview
                         var tmOpt = p.Build(member, animAttr);
                         if (tmOpt.HasValue)
                         {
-                            result.Add(tmOpt.Value);
+                            var tm = tmOpt.Value;
+                            result.Add(tm);
+                            try { s_ProviderByMember[member] = p; } catch { }
                             break; // move to next member once one provider handled it
                         }
                     }
@@ -108,9 +110,18 @@ namespace EditorPlus.AnimationPreview
             TrackMember? Build(System.Reflection.MemberInfo member, object animationEventAttributeInstance);
         }
 
+            // Optional interface providers can implement to handle custom drawing for their TrackMembers
+            public interface ICustomTrackDrawer
+            {
+                // Draw the given TrackMember into rect for the target object
+                void Draw(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames);
+            }
+
         // Provider registry for open-closed extensibility. Providers should register themselves
         // via TrackRenderer.RegisterTrackProvider (e.g. Providers/*.cs files).
         private static readonly List<ITrackProvider> s_Providers = new List<ITrackProvider>();
+    // Mapping from MemberInfo to the provider that created its TrackMember (populated during Build)
+    private static readonly Dictionary<MemberInfo, ITrackProvider> s_ProviderByMember = new Dictionary<MemberInfo, ITrackProvider>();
 
         /// <summary>
         /// Register a custom track provider. Newly registered providers take precedence over built-in providers.
@@ -124,6 +135,7 @@ namespace EditorPlus.AnimationPreview
             s_Providers.Insert(0, provider);
             // Invalidate cached TrackMember lists so newly-registered providers can take effect
             try { TimelineContext.TrackMembersCache.Clear(); } catch { }
+            try { s_ProviderByMember.Clear(); } catch { }
         }
 
         /// <summary>
@@ -187,73 +199,24 @@ namespace EditorPlus.AnimationPreview
         // track creation is implemented by per-type providers in the Providers/ folder. This
         // keeps TrackRenderer free of reflection and allows each data type to own its Track logic.
 
-        private static void DrawSingleTrack(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
+    internal static void DrawSingleTrack(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
         {
-            EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.04f));
-
-            if (tm.ValueType == typeof(int))
+            // If a provider supplied this member, delegate drawing to the provider if it implements Draw
+            if (tm.Member != null && s_ProviderByMember.TryGetValue(tm.Member, out var prov))
             {
-                int val = (int)(tm.Getter?.Invoke(target) ?? 0);
-                AnimationPreviewDrawer.DrawSingleMarker(target, tm, rect, st, val, tm.Color, TimelineContext.MarkerWidth, TimelineContext.ComputeControlSeed(target, tm), totalFrames, out _, out bool context, out int draggedFrame);
-
-                if (draggedFrame != val && tm.Setter != null)
+                try
                 {
-                    tm.Setter(target, draggedFrame);
-                    EditorUtility.SetDirty(target);
-                }
-
-                if (context) AnimationPreviewDrawer.ShowReadOnlyContextMenu();
-            }
-            else if (tm.ValueType == typeof(int[]))
-            {
-                var arr = (int[])(tm.Getter?.Invoke(target) ?? Array.Empty<int>());
-                if (arr == null) arr = Array.Empty<int>();
-
-                var controlSeed = TimelineContext.ComputeControlSeed(target, tm);
-
-                if (arr.Length == 2)
-                {
-                    var binding = AnimationPreviewDrawer.CreateArrayWindowBinding(target, tm, arr, totalFrames);
-                    AnimationPreviewDrawer.DrawWindowBinding(target, tm, rect, st, totalFrames, controlSeed, binding);
-                }
-                else
-                {
-                    AnimationPreviewDrawer.DrawMarkers(target, tm, rect, st, arr, tm.Color, TimelineContext.MarkerWidth, controlSeed, totalFrames, out _, out bool context, out int draggedIndex, out int draggedFrame);
-
-                    if (draggedIndex >= 0 && draggedIndex < arr.Length && draggedFrame != arr[draggedIndex] && tm.Setter != null)
+                    if (prov is ICustomTrackDrawer drawer)
                     {
-                        var newArr = (int[])arr.Clone();
-                        newArr[draggedIndex] = draggedFrame;
-                        tm.Setter(target, newArr);
-                        EditorUtility.SetDirty(target);
-                    }
-
-                    if (context) AnimationPreviewDrawer.ShowReadOnlyContextMenu();
-                }
-            }
-            else if (AnimationPreviewDrawer.HasAffectWindowPattern(tm.ValueType))
-            {
-                var windowInstance = tm.Getter?.Invoke(target);
-                if (windowInstance != null)
-                {
-                    var binding = AnimationPreviewDrawer.CreateAffectWindowBinding(target, tm, windowInstance, totalFrames);
-                    AnimationPreviewDrawer.DrawWindowBinding(target, tm, rect, st, totalFrames, TimelineContext.ComputeControlSeed(target, tm), binding);
-
-                    var evt = Event.current;
-                    if (evt.type == EventType.ContextClick && rect.Contains(evt.mousePosition))
-                    {
-                        AnimationPreviewDrawer.ShowReadOnlyContextMenu();
-                        evt.Use();
+                        drawer.Draw(target, tm, rect, st, totalFrames);
+                        return;
                     }
                 }
-                else
-                {
-                    EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.02f));
-                    var c = GUI.color; GUI.color = new Color(1, 1, 1, 0.5f);
-                    GUI.Label(rect, "〈No Window Data〉", SirenixGUIStyles.MiniLabelCentered);
-                    GUI.color = c;
-                }
+                catch { }
             }
+
+            // Minimal placeholder when no provider exists for this member: draw a subtle background
+            EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.01f));
         }
     }
 }

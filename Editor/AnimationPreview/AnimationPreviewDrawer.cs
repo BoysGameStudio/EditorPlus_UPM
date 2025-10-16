@@ -156,10 +156,10 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
 
     private UnityEngine.Object ResolveOwningUnityObject()
     {
+        // Simplified owner resolution: do not perform any host-type-specific checks here.
         var clipValue = this.ValueEntry?.WeakSmartValue as UnityEngine.Object;
-
-        // Collect candidate owners from the property chain and from the serialization root
-        List<UnityEngine.Object> candidates = new List<UnityEngine.Object>(4);
+        var candidates = new List<UnityEngine.Object>(4);
+        var seen = new HashSet<int>();
 
         var prop = this.Property?.Parent;
         while (prop != null)
@@ -167,7 +167,8 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
             var entry = prop.ValueEntry;
             if (entry != null && entry.WeakSmartValue is UnityEngine.Object unityObj && unityObj != clipValue)
             {
-                candidates.Add(unityObj);
+                int id = unityObj.GetInstanceID();
+                if (seen.Add(id)) candidates.Add(unityObj);
             }
             prop = prop.Parent;
         }
@@ -180,50 +181,14 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
             {
                 if (value is UnityEngine.Object unityObj && unityObj != clipValue)
                 {
-                    candidates.Add(unityObj);
+                    int id = unityObj.GetInstanceID();
+                    if (seen.Add(id)) candidates.Add(unityObj);
                 }
             }
         }
 
-        // Prefer a candidate that actually supports preview/seek
-        for (int i = 0; i < candidates.Count; i++)
-        {
-            var c = candidates[i];
-            if (ActiveActionIntegration.HasPreview(c) || ActiveActionIntegration.CanSeekPreview(c))
-            {
-                return c;
-            }
-        }
-
-        // Prefer a candidate that declares a Timeline track member (AnimationEventAttribute)
-        foreach (var c in candidates)
-        {
-            try
-            {
-                // Typed-first: known Quantum asset types
-                try
-                {
-                    if (c is Quantum.AttackActionData || c is Quantum.ActiveActionData)
-                    {
-                        return c;
-                    }
-                }
-                catch { }
-
-                // Use TrackRenderer which has typed-first discovery for known types and a reflection fallback for unknowns.
-                var tracks = TrackRenderer.GetTrackMembers(c);
-                if (tracks != null && tracks.Length > 0) return c;
-            }
-            catch { }
-        }
-
-        // Fallback to the first collected candidate
-        if (candidates.Count > 0)
-        {
-            return candidates[0];
-        }
-
-        return null;
+        // Return first available candidate if any. Providers / other subsystems own any type-specific behavior.
+        return candidates.Count > 0 ? candidates[0] : null;
     }
 
     // ---------------- FPS helper ----------------
@@ -515,233 +480,36 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
 
     private static void DrawSingleTrack(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
     {
-        EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.04f));
-
-        if (tm.ValueType == typeof(int))
+        // Delegate drawing to TrackRenderer which will call the provider that built the TrackMember.
+        // This keeps type-specific drawing logic inside providers.
+        try
         {
-            int val = (int)(tm.Getter?.Invoke(target) ?? 0);
-            DrawSingleMarker(target, tm, rect, st, val, tm.Color, TimelineContext.MarkerWidth, TimelineContext.ComputeControlSeed(target, tm), totalFrames, out _, out bool context, out int draggedFrame);
-
-            // Handle dragging to change value
-            if (draggedFrame != val && tm.Setter != null)
+            // Try to find a registered provider that can draw this TrackMember.
+            var providers = TrackRenderer.GetRegisteredProviders();
+            if (providers != null)
             {
-                tm.Setter(target, draggedFrame);
-                EditorUtility.SetDirty(target);
-            }
-
-            if (context)
-            {
-                ShowReadOnlyContextMenu();
-            }
-        }
-        else if (tm.ValueType != null && tm.ValueType.IsArray)
-        {
-            // Support arrays of POCO/frame structs like HitFrame[] where each element has a 'frame' int member.
-            var arrObj = tm.Getter?.Invoke(target) as Array;
-            int[] frames = Array.Empty<int>();
-            object[] elements = null;
-            if (arrObj != null)
-            {
-                var list = new List<int>(arrObj.Length);
-                elements = new object[arrObj.Length];
-                for (int i = 0; i < arrObj.Length; i++)
-                {
-                    var elem = arrObj.GetValue(i);
-                    elements[i] = elem;
-                    if (elem == null) continue;
-                    int elemFrame = -1;
-                    try
-                    {
-                        // Typed direct access to known Quantum frame types (no string/reflection)
-                        if (elem is Quantum.HitFrame hf) elemFrame = hf.frame;
-                        else if (elem is Quantum.ProjectileFrame pf) elemFrame = pf.frame;
-                        else if (elem is Quantum.ChildActorFrame caf) elemFrame = caf.Frame;
-                        else elemFrame = -1;
-                    }
-                    catch { elemFrame = -1; }
-                    if (elemFrame >= 0) list.Add(elemFrame);
-                    else list.Add(-1);
-                }
-
-                // Build frames array for drawing: use -1 entries as skipped
-                var tmp = new List<int>(list.Count);
-                for (int i = 0; i < list.Count; i++) if (list[i] >= 0) tmp.Add(list[i]);
-                frames = tmp.ToArray();
-            }
-
-            if (frames != null && frames.Length > 0)
-            {
-                // DEBUG: show count of detected elements in the track (helps debug why markers may be missing)
-                if (Event.current.type == EventType.Repaint)
+                foreach (var p in providers)
                 {
                     try
                     {
-                        var dbgRect = new Rect(rect.x + 4, rect.y + 2, 200, 16);
-                        GUIStyle s = new GUIStyle(EditorStyles.miniLabel) { normal = { textColor = Color.white } };
-                        GUI.Label(dbgRect, $"Elements: { (arrObj != null ? arrObj.Length : 0) }  FramesDrawn: {frames.Length}", s);
-                    }
-                    catch { }
-                }
-                DrawMarkers(target, tm, rect, st, frames, tm.Color, TimelineContext.MarkerWidth, TimelineContext.ComputeControlSeed(target, tm), totalFrames, out int clickedIndex, out bool context, out int draggedIndex, out int draggedFrame);
-
-                // Removed verbose diagnostic logging; keep drawing only.
-
-                // If a drag changed a frame and we have a setter, try to update the backing element's 'frame' member and apply.
-                if (draggedIndex >= 0 && draggedFrame >= 0 && arrObj != null && tm.Setter != null)
-                {
-                    // Need to map draggedIndex in compacted frames[] back to original element index
-                        int mapped = -1; int seen = 0;
-                    for (int i = 0; i < arrObj.Length; i++)
-                    {
-                        var elem = arrObj.GetValue(i);
-                        if (elem == null) continue;
-                        int ef = -1;
-                        try
+                        if (p == null) continue;
+                        var ownerType = tm.Member?.DeclaringType ?? target?.GetType();
+                        if (ownerType == null) continue;
+                        if (!p.CanHandle(ownerType)) continue;
+                        if (p is TrackRenderer.ICustomTrackDrawer drawer)
                         {
-                            if (elem is Quantum.HitFrame hf2) ef = hf2.frame;
-                            else if (elem is Quantum.ProjectileFrame pf2) ef = pf2.frame;
-                            else if (elem is Quantum.ChildActorFrame caf2) ef = caf2.Frame;
-                            else ef = -1;
-                        }
-                        catch { ef = -1; }
-                        if (ef >= 0)
-                        {
-                            if (seen == draggedIndex) { mapped = i; break; }
-                            seen++;
-                        }
-                    }
-
-                    if (mapped >= 0)
-                    {
-                        var elem = arrObj.GetValue(mapped);
-                            if (elem != null)
-                            {
-                                bool applied = false;
-                                try
-                                {
-                                    if (elem is Quantum.HitFrame hh)
-                                    {
-                                        hh.frame = draggedFrame;
-                                        try { arrObj.SetValue(hh, mapped); } catch { }
-                                        applied = true;
-                                    }
-                                    else if (elem is Quantum.ProjectileFrame pp)
-                                    {
-                                        pp.frame = draggedFrame;
-                                        try { arrObj.SetValue(pp, mapped); } catch { }
-                                        applied = true;
-                                    }
-                                        else if (elem is Quantum.ChildActorFrame cc)
-                                        {
-                                            // ChildActorFrame.Frame is read-only in the simulation types; do not attempt to mutate it here.
-                                            // Editing read-only simulation-frame structs would require reflection into Quantum types which is forbidden.
-                                            applied = false;
-                                        }
-                                }
-                                catch { applied = false; }
-
-                                if (applied)
-                                {
-                                    try
-                                    {
-                                        tm.Setter(target, arrObj);
-                                        EditorUtility.SetDirty(target);
-                                    }
-                                    catch { }
-                                }
-                            }
-                    }
-                }
-
-                if (context)
-                {
-                    ShowReadOnlyContextMenu();
-                }
-            }
-            else
-            {
-                    // Fallback: try reading via SerializedProperty in case the getter doesn't expose the runtime array
-                    bool drewFromSerialized = false;
-                    try
-                    {
-                        // Local helper: typed-first read of frame arrays with SerializedProperty fallback
-                        frames = ReadFrameArrayLocal(target, tm.Member);
-                        if (frames != null && frames.Length > 0)
-                        {
-                            DrawMarkers(target, tm, rect, st, frames, tm.Color, TimelineContext.MarkerWidth, TimelineContext.ComputeControlSeed(target, tm), totalFrames, out int clickedIndex2, out bool context2, out int draggedIndex2, out int draggedFrame2);
-                            if (context2) ShowReadOnlyContextMenu();
-                            drewFromSerialized = true;
+                            drawer.Draw(target, tm, rect, st, totalFrames);
+                            return;
                         }
                     }
                     catch { }
-
-                    if (!drewFromSerialized)
-                    {
-                        // Diagnostic: log that an array exists but no valid frame values were found
-                        // No valid frame values discovered; show empty indicator.
-
-                        // No frame-like elements: show empty indicator
-                        EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.02f));
-                        var c = GUI.color; GUI.color = new Color(1, 1, 1, 0.5f);
-                        GUI.Label(rect, "〈No Frame Data〉", SirenixGUIStyles.MiniLabelCentered);
-                        GUI.color = c;
-                    }
-            }
-        }
-        else if (tm.ValueType == typeof(int[]))
-        {
-            var arr = (int[])(tm.Getter?.Invoke(target) ?? Array.Empty<int>());
-            if (arr == null) arr = Array.Empty<int>();
-
-            var controlSeed = TimelineContext.ComputeControlSeed(target, tm);
-
-            if (arr.Length == 2)
-            {
-                var binding = CreateArrayWindowBinding(target, tm, arr, totalFrames);
-                DrawWindowBinding(target, tm, rect, st, totalFrames, controlSeed, binding);
-            }
-            else
-            {
-                DrawMarkers(target, tm, rect, st, arr, tm.Color, TimelineContext.MarkerWidth, controlSeed, totalFrames, out _, out bool context, out int draggedIndex, out int draggedFrame);
-
-                // Handle dragging to change array element value
-                if (draggedIndex >= 0 && draggedIndex < arr.Length && draggedFrame != arr[draggedIndex] && tm.Setter != null)
-                {
-                    var newArr = (int[])arr.Clone();
-                    newArr[draggedIndex] = draggedFrame;
-                    tm.Setter(target, newArr);
-                    EditorUtility.SetDirty(target);
-                }
-
-                if (context)
-                {
-                    ShowReadOnlyContextMenu();
                 }
             }
-        }
-        else if (HasAffectWindowPattern(tm.ValueType))
-        {
-            var windowInstance = tm.Getter?.Invoke(target);
-            if (windowInstance != null)
-            {
-                var binding = CreateAffectWindowBinding(target, tm, windowInstance, totalFrames);
-                DrawWindowBinding(target, tm, rect, st, totalFrames, TimelineContext.ComputeControlSeed(target, tm), binding);
 
-                var evt = Event.current;
-                if (evt.type == EventType.ContextClick && rect.Contains(evt.mousePosition))
-                {
-                    ShowReadOnlyContextMenu();
-                    evt.Use();
-                }
-            }
-            else
-            {
-                EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.02f));
-                var c = GUI.color; GUI.color = new Color(1, 1, 1, 0.5f);
-                GUI.Label(rect, "〈No Window Data〉", SirenixGUIStyles.MiniLabelCentered);
-                GUI.color = c;
-            }
+            // Minimal background when no provider drew the member
+            EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.04f));
         }
+        catch { }
     }
 
     // ---------------- Drawing helpers ----------------
@@ -1255,33 +1023,22 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
                 }
                 return false;
             }
-
-            // Typed Quantum structures
-            if (instance is Quantum.ActiveActionIFrames iFrames)
+            // Reflection-based setter for normal objects/structs
+            var t = instance.GetType();
+            // Field
+            var fi = t.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
+            if (fi != null && fi.FieldType == typeof(int))
             {
-                if (memberName.Equals("IntraActionStartFrame", StringComparison.OrdinalIgnoreCase)) { iFrames.IntraActionStartFrame = value; return true; }
-                if (memberName.Equals("IntraActionEndFrame", StringComparison.OrdinalIgnoreCase)) { iFrames.IntraActionEndFrame = value; return true; }
-            }
-
-            if (instance is Quantum.ActiveActionAffectWindow aw)
-            {
-                if (memberName.Equals("IntraActionStartFrame", StringComparison.OrdinalIgnoreCase)) { aw.IntraActionStartFrame = value; return true; }
-                if (memberName.Equals("IntraActionEndFrame", StringComparison.OrdinalIgnoreCase)) { aw.IntraActionEndFrame = value; return true; }
-            }
-
-            // Frame elements (boxed structs) - set only for mutable types
-            if (instance is Quantum.HitFrame hf)
-            {
-                hf.frame = value;
+                fi.SetValue(instance, value);
                 return true;
             }
-            if (instance is Quantum.ProjectileFrame pf)
+            // Property
+            var pi = t.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
+            if (pi != null && pi.CanWrite && pi.PropertyType == typeof(int))
             {
-                pf.frame = value;
+                pi.SetValue(instance, value, null);
                 return true;
             }
-
-            // ChildActorFrame.Frame is read-only; do not attempt to set
         }
         catch { }
         return false;
@@ -1298,24 +1055,22 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
                 if (p != null) return p.intValue;
                 return fallback;
             }
-
-            if (instance is Quantum.ActiveActionIFrames iFrames)
+            // Reflection-based getter
+            var t = instance.GetType();
+            var fi = t.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
+            if (fi != null && fi.FieldType == typeof(int))
             {
-                if (memberName.Equals("IntraActionStartFrame", StringComparison.OrdinalIgnoreCase)) return iFrames.IntraActionStartFrame;
-                if (memberName.Equals("IntraActionEndFrame", StringComparison.OrdinalIgnoreCase)) return iFrames.IntraActionEndFrame;
+                var v = fi.GetValue(instance);
+                if (v is int iv) return iv;
                 return fallback;
             }
-
-            if (instance is Quantum.ActiveActionAffectWindow aw)
+            var pi = t.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
+            if (pi != null && pi.CanRead && pi.PropertyType == typeof(int))
             {
-                if (memberName.Equals("IntraActionStartFrame", StringComparison.OrdinalIgnoreCase)) return aw.IntraActionStartFrame;
-                if (memberName.Equals("IntraActionEndFrame", StringComparison.OrdinalIgnoreCase)) return aw.IntraActionEndFrame;
+                var v = pi.GetValue(instance, null);
+                if (v is int iv2) return iv2;
                 return fallback;
             }
-
-            if (instance is Quantum.HitFrame hf) return hf.frame;
-            if (instance is Quantum.ProjectileFrame pf) return pf.frame;
-            if (instance is Quantum.ChildActorFrame caf) return caf.Frame;
         }
         catch { }
         return fallback;
@@ -1512,34 +1267,12 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
     }
 
     // Localized helpers to avoid referencing TimelineUtils from this file.
-    private static int[] ReadFrameArrayLocal(UnityEngine.Object owner, MemberInfo member)
+    internal static int[] ReadFrameArrayLocal(UnityEngine.Object owner, MemberInfo member)
     {
         if (owner == null || member == null) return Array.Empty<int>();
 
         try
         {
-            // Typed-first: known Quantum asset arrays
-            try
-            {
-                if (owner is Quantum.AttackActionData attack)
-                {
-                    if (attack.hitFrames != null)
-                    {
-                        var tmp = new System.Collections.Generic.List<int>(attack.hitFrames.Length);
-                        foreach (var hf in attack.hitFrames) if (hf != null) tmp.Add(hf.frame);
-                        return tmp.ToArray();
-                    }
-
-                    if (attack.projectileFrames != null)
-                    {
-                        var tmp = new System.Collections.Generic.List<int>(attack.projectileFrames.Length);
-                        foreach (var pf in attack.projectileFrames) if (pf != null) tmp.Add(pf.frame);
-                        return tmp.ToArray();
-                    }
-                }
-            }
-            catch { }
-
             Func<object> getter = null;
             if (member is FieldInfo fi) getter = () => fi.GetValue(owner);
             else if (member is PropertyInfo pi && pi.CanRead) getter = () => pi.GetValue(owner, null);
@@ -1551,13 +1284,33 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
                 for (int i = 0; i < arrObj.Length; i++)
                 {
                     var elem = arrObj.GetValue(i);
-                    if (elem == null) { list.Add(-1); continue; }
+                    if (elem == null) continue;
+                    // Try reflection: look for 'frame' field or property
                     int ef = -1;
-                    if (TryGetIntFieldOrPropLocal(elem, "frame", out ef)) list.Add(ef); else list.Add(-1);
+                    try
+                    {
+                        var et = elem.GetType();
+                        var fiElem = et.GetField("frame", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
+                        if (fiElem != null)
+                        {
+                            var v = fiElem.GetValue(elem);
+                            if (v is int iv) ef = iv;
+                        }
+                        else
+                        {
+                            var piElem = et.GetProperty("frame", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
+                            if (piElem != null && piElem.CanRead)
+                            {
+                                var v = piElem.GetValue(elem, null);
+                                if (v is int iv2) ef = iv2;
+                            }
+                        }
+                    }
+                    catch { }
+
+                    if (ef >= 0) list.Add(ef);
                 }
-                var tmp = new System.Collections.Generic.List<int>();
-                for (int i = 0; i < list.Count; i++) if (list[i] >= 0) tmp.Add(list[i]);
-                return tmp.ToArray();
+                return list.ToArray();
             }
         }
         catch { }
@@ -1585,21 +1338,6 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         return Array.Empty<int>();
     }
 
-    // Local typed-only fast path to read 'frame' from known Quantum frame types.
-    // This intentionally avoids reflection and only supports the in-repo known frame structs.
-    private static bool TryGetIntFieldOrPropLocal(object instance, string name, out int value)
-    {
-        value = -1;
-        if (instance == null) return false;
-        try
-        {
-            if (instance is Quantum.HitFrame hf && (name.Equals("frame", StringComparison.OrdinalIgnoreCase) || name.Equals("Frame", StringComparison.OrdinalIgnoreCase))) { value = hf.frame; return true; }
-            if (instance is Quantum.ProjectileFrame pf && (name.Equals("frame", StringComparison.OrdinalIgnoreCase) || name.Equals("Frame", StringComparison.OrdinalIgnoreCase))) { value = pf.frame; return true; }
-            if (instance is Quantum.ChildActorFrame caf && (name.Equals("frame", StringComparison.OrdinalIgnoreCase) || name.Equals("Frame", StringComparison.OrdinalIgnoreCase))) { value = caf.Frame; return true; }
-        }
-        catch { }
-
-        return false;
-    }
+    // Removed typed-only fast path helper. Reflection/SerializedProperty are used instead.
 }
 #endif
