@@ -18,7 +18,7 @@ namespace EditorPlus.AnimationPreview
 
             Debug.Log($"PreviewRenderer Diagnostics: Selected object type={obj.GetType().FullName}, name={obj.name}");
 
-            var root = typeof(PreviewRenderer).GetMethod("ResolvePreviewRoot", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)?.Invoke(null, new object[] { obj }) as GameObject;
+            var root = PreviewRenderer.ResolvePreviewRoot(obj);
             Debug.Log($"Resolved preview root: {(root != null ? root.name : "<null>")}");
 
             try
@@ -41,28 +41,22 @@ namespace EditorPlus.AnimationPreview
             }
             catch { }
 
-            // Try reflection fallback
-            var fi = obj.GetType().GetField("hitFrames", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-            if (fi != null)
+            // If the asset is a known Quantum type, access typed members directly (no reflection)
+            try
             {
-                var arr = fi.GetValue(obj) as System.Array;
-                if (arr != null)
+                if (obj is Quantum.AttackActionData attack && attack.hitFrames != null)
                 {
-                    Debug.Log($"Reflected hitFrames array length: {arr.Length}");
-                    for (int i = 0; i < arr.Length; i++)
+                    Debug.Log($"Typed AttackActionData.hitFrames length: {attack.hitFrames.Length}");
+                    for (int i = 0; i < attack.hitFrames.Length; i++)
                     {
-                        var elem = arr.GetValue(i);
-                        if (elem == null) continue;
-                        var f = elem.GetType().GetField("frame", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-                        if (f != null)
-                        {
-                            var fv = f.GetValue(elem);
-                            Debug.Log($"  hitFrames[{i}] frame={fv}");
-                        }
+                        var hf = attack.hitFrames[i];
+                        if (hf == null) continue;
+                        Debug.Log($"  hitFrames[{i}] frame={hf.frame}");
                     }
                     return;
                 }
             }
+            catch { }
 
             Debug.Log("No hitFrames discovered (serialized or reflected).");
         }
