@@ -1,9 +1,9 @@
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using UnityEditor;
 using UnityEngine;
+using Quantum;
 
 /// <summary>
 /// Small editor utility to print timeline track diagnostics for the currently selected object.
@@ -16,120 +16,118 @@ public static class TimelineVerboseLogger
     public static void LogSelectedTracks()
     {
         var obj = Selection.activeObject;
-        Debug.Log($"[TimelineVerbose] Selection => Type={(obj!=null?obj.GetType().Name:"(null)")} Name={(obj!=null?obj.name:"(null)")}");
+        Debug.Log($"[TimelineVerbose] Selection => Type={(obj!=null?obj.GetType().FullName:"(null)")} Name={(obj!=null?obj.name:"(null)")}");
         if (obj == null)
         {
             return;
         }
 
-        var type = obj.GetType();
-        var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
-        var members = type.GetMembers(flags);
-        int found = 0;
-
-        foreach (var member in members)
+        try
         {
-            try
+            // Handle common Quantum types explicitly (no reflection, no string member access)
+            if (obj is AttackActionData attack)
             {
-                var attr = member.GetCustomAttribute(typeof(AnimationEventAttribute)) as AnimationEventAttribute;
-                if (attr == null) continue;
-                found++;
+                Debug.Log($"[TimelineVerbose] Type=AttackActionData");
 
-                string label = string.IsNullOrEmpty(attr.Label) ? member.Name : attr.Label;
-                string memberTypeName = "?";
-                if (member is FieldInfo f) memberTypeName = f.FieldType.Name;
-                else if (member is PropertyInfo p) memberTypeName = p.PropertyType.Name;
-
-                Debug.Log($"[TimelineVerbose] Track: {label} Member={member.Name} Type={memberTypeName}");
-
-                Func<object> getter = null;
-                if (member is FieldInfo fi) getter = () => fi.GetValue(obj);
-                else if (member is PropertyInfo pi && pi.CanRead) getter = () => pi.GetValue(obj, null);
-
-                object value = null;
-                try { value = getter != null ? getter() : null; } catch (Exception ex) { Debug.LogWarning($"[TimelineVerbose] Getter threw: {ex.Message}"); }
-
-                if (value == null)
+                if (attack.hitFrames != null)
                 {
-                    Debug.Log("[TimelineVerbose] Value is null");
-                    // Try SerializedProperty fallback
-                    try
+                    Debug.Log($"[TimelineVerbose] hitFrames length={attack.hitFrames.Length}");
+                    for (int i = 0; i < attack.hitFrames.Length; i++)
                     {
-                        var so = new SerializedObject(obj);
-                        var prop = so.FindProperty(member.Name);
-                        if (prop != null && prop.isArray && prop.arraySize > 0)
+                        var hf = attack.hitFrames[i];
+                        if (hf == null)
                         {
-                            Debug.Log($"[TimelineVerbose] Serialized array detected for {member.Name} size={prop.arraySize}");
-                            var list = new List<int>();
-                            for (int i = 0; i < prop.arraySize; i++)
-                            {
-                                var elem = prop.GetArrayElementAtIndex(i);
-                                var frameProp = elem.FindPropertyRelative("frame");
-                                if (frameProp != null) list.Add(frameProp.intValue);
-                            }
-                            Debug.Log($"[TimelineVerbose] FramesFound={list.Count} Samples={(list.Count>0?list[0].ToString():"-")}");
-                        }
-                    }
-                    catch { }
-
-                    continue;
-                }
-
-                if (value is Array arr)
-                {
-                    Debug.Log($"[TimelineVerbose] Elements: {arr.Length}");
-                    var list = new List<int>();
-                    for (int i = 0; i < arr.Length; i++)
-                    {
-                        var elem = arr.GetValue(i);
-                        if (elem == null)
-                        {
-                            Debug.Log($"[TimelineVerbose] Elem[{i}] is null");
-                            list.Add(-1);
-                            continue;
-                        }
-
-                        int ef = -1;
-                        var fField = elem.GetType().GetField("frame", flags);
-                        if (fField != null)
-                        {
-                            try { var v = fField.GetValue(elem); ef = Convert.ToInt32(v); } catch { ef = -1; }
+                            Debug.Log($"[TimelineVerbose] hitFrames[{i}] is null");
                         }
                         else
                         {
-                            var pInfo = elem.GetType().GetProperty("frame", flags);
-                            if (pInfo != null)
-                            {
-                                try { var v = pInfo.GetValue(elem, null); ef = Convert.ToInt32(v); } catch { ef = -1; }
-                            }
+                            Debug.Log($"[TimelineVerbose] hitFrames[{i}] frame={hf.frame}");
                         }
-
-                        Debug.Log($"[TimelineVerbose] Elem[{i}] frame={ef} type={elem.GetType().Name}");
-                        list.Add(ef);
                     }
-                    var valid = list.FindAll(x => x >= 0);
-                    Debug.Log($"[TimelineVerbose] FramesFound={valid.Count} Samples={(valid.Count>0?valid[0].ToString():"-")}");
                 }
-                else if (value is int vint)
-                {
-                    Debug.Log($"[TimelineVerbose] int marker={vint}");
-                }
-                else if (value is int[] iarr)
-                {
-                    Debug.Log($"[TimelineVerbose] int[] length={iarr.Length} values={string.Join(",", iarr)}");
-                }
-                else
-                {
-                    Debug.Log($"[TimelineVerbose] Value type {value.GetType().Name} not an array");
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[TimelineVerbose] Inspect error: {ex.Message}");
-            }
-        }
 
-        if (found == 0) Debug.Log("[TimelineVerbose] No tracks found (no AnimationEventAttribute members)");
+                if (attack.projectileFrames != null)
+                {
+                    Debug.Log($"[TimelineVerbose] projectileFrames length={attack.projectileFrames.Length}");
+                    for (int i = 0; i < attack.projectileFrames.Length; i++)
+                    {
+                        var pf = attack.projectileFrames[i];
+                        if (pf == null) Debug.Log($"[TimelineVerbose] projectileFrames[{i}] is null"); else Debug.Log($"[TimelineVerbose] projectileFrames[{i}] frame={pf.frame}");
+                    }
+                }
+
+                if (attack.childActorFrames != null)
+                {
+                    Debug.Log($"[TimelineVerbose] childActorFrames length={attack.childActorFrames.Length}");
+                    for (int i = 0; i < attack.childActorFrames.Length; i++)
+                    {
+                        var cf = attack.childActorFrames[i];
+                        if (cf == null) Debug.Log($"[TimelineVerbose] childActorFrames[{i}] is null"); else Debug.Log($"[TimelineVerbose] childActorFrames[{i}] frame={cf.Frame}");
+                    }
+                }
+
+                if (attack.affectFrames != null)
+                {
+                    Debug.Log($"[TimelineVerbose] affectFrames length={attack.affectFrames.Length}");
+                    for (int i = 0; i < attack.affectFrames.Length; i++)
+                    {
+                        var af = attack.affectFrames[i];
+                        if (af == null) Debug.Log($"[TimelineVerbose] affectFrames[{i}] is null"); else Debug.Log($"[TimelineVerbose] affectFrames[{i}] frame={af.Frame}");
+                    }
+                }
+
+                return;
+            }
+
+            if (obj is ActiveActionData activeAction)
+            {
+                Debug.Log($"[TimelineVerbose] Type=ActiveActionData");
+                Debug.Log($"[TimelineVerbose] MoveInterruptionLockEndFrame={activeAction.MoveInterruptionLockEndFrame} ActionMovementStartFrame={activeAction.ActionMovementStartFrame}");
+
+                if (activeAction.NonHitLockableFrames != null)
+                {
+                    Debug.Log($"[TimelineVerbose] NonHitLockableFrames={string.Join(",", activeAction.NonHitLockableFrames)}");
+                }
+
+                if (activeAction.IFrames != null)
+                {
+                    Debug.Log($"[TimelineVerbose] IFrames start={activeAction.IFrames.IntraActionStartFrame} end={activeAction.IFrames.IntraActionEndFrame}");
+                }
+
+                if (activeAction.AffectWindow != null)
+                {
+                    Debug.Log($"[TimelineVerbose] AffectWindow start={activeAction.AffectWindow.IntraActionStartFrame} end={activeAction.AffectWindow.IntraActionEndFrame}");
+                }
+
+                return;
+            }
+
+            // Try common Quantum interfaces that expose frame lists without reflection
+            if (obj is IOffensiveAction offensive)
+            {
+                try
+                {
+                    var hfArr = offensive.GetHitFrames();
+                    if (hfArr != null)
+                    {
+                        Debug.Log($"[TimelineVerbose] IOffensiveAction.GetHitFrames length={hfArr.Length}");
+                        for (int i = 0; i < hfArr.Length; i++)
+                        {
+                            var hf = hfArr[i];
+                            if (hf == null) Debug.Log($"[TimelineVerbose] HitFrame[{i}] is null"); else Debug.Log($"[TimelineVerbose] HitFrame[{i}] frame={hf.frame}");
+                        }
+                        return;
+                    }
+                }
+                catch { }
+            }
+
+            Debug.Log($"[TimelineVerbose] No typed handlers matched for {obj.GetType().FullName}. This tool intentionally avoids reflection/string access.");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[TimelineVerbose] Inspect error: {ex.Message}");
+        }
     }
 }
 
