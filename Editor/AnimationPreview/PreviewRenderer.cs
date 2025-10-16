@@ -1,6 +1,8 @@
 #if UNITY_EDITOR
 using System;
 using System.Reflection;
+using Quantum;
+using Quantum.Physics3D;
 using UnityEngine;
 using UnityEditor;
 
@@ -12,170 +14,186 @@ namespace EditorPlus.AnimationPreview
         {
             if (parentTarget == null) return;
 
+            // Only draw during repaint
+            if (Event.current == null || Event.current.type != EventType.Repaint) return;
+
             try
             {
-                if (Event.current.type != EventType.Repaint) return;
-
+                // 1) If the asset is Unity-serialized (ScriptableObject / MonoBehaviour), try SerializedProperty first
                 var so = new SerializedObject(parentTarget);
-                var prop = so.FindProperty("hitFrames");
-                if (prop == null)
+                var hitFramesProp = so.FindProperty("hitFrames");
+                if (hitFramesProp != null && hitFramesProp.isArray)
                 {
-                    // Fallback for non-Unity-serialized types (Odin/POCO). Try reflection to find a field named 'hitFrames'.
-                    try
+                    for (int idx = 0; idx < hitFramesProp.arraySize; idx++)
                     {
-                        var fi = parentTarget.GetType().GetField("hitFrames", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        Array arrObj = null;
-                        if (fi != null)
+                        var elem = hitFramesProp.GetArrayElementAtIndex(idx);
+                        if (elem == null) continue;
+                        var frameProp = elem.FindPropertyRelative("frame");
+                        if (frameProp == null) continue;
+                        var f = GetIntSafe(frameProp, int.MinValue);
+                        if (f == int.MinValue) continue;
+                        if (f != frame) continue;
+
+                        var shapeProp = elem.FindPropertyRelative("shape");
+                        if (shapeProp != null && shapeProp.propertyType == SerializedPropertyType.Generic)
                         {
-                            arrObj = fi.GetValue(parentTarget) as Array;
+                            var ctx = ResolvePreviewRoot(parentTarget);
+                            DrawShape3DConfigPreview(shapeProp, ctx);
+                        }
+                        else
+                        {
+                            Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
+                            Handles.DrawWireDisc(Vector3.zero, Vector3.up, 0.5f);
+                            Handles.Label(Vector3.up * 0.6f, "HitFrame");
                         }
 
-                        // If not found directly on the parent, search nested fields/properties for any hitFrames arrays.
-                        if (arrObj == null)
+                        // we only draw the first matching frame
+                        return;
+                    }
+                }
+
+                // 2) If we can directly reference Quantum types (typed-first), prefer that (less fragile)
+                try
+                {
+                    if (parentTarget is AttackActionData attack && attack.hitFrames != null)
+                    {
+                        foreach (var hf in attack.hitFrames)
                         {
-                            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                            // Search fields
-                            foreach (var field in parentTarget.GetType().GetFields(flags))
+                            if (hf == null) continue;
+                            if (hf.frame != frame) continue;
+
+                            if (hf.shape != null)
+                            {
+                                var ctx = ResolvePreviewRoot(parentTarget);
+                                // hf.shape is a Shape3DConfig in Quantum packages; draw via reflection-free path if possible
+                                DrawShape3DConfigPreviewFromReflection(hf.shape, ctx);
+                            }
+                            else
+                            {
+                                Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
+                                Handles.DrawWireDisc(Vector3.zero, Vector3.up, 0.5f);
+                                Handles.Label(Vector3.up * 0.6f, "HitFrame");
+                            }
+
+                            return;
+                        }
+                    }
+                }
+                catch { /* typed path may fail in some editor contexts; fallback to reflection below */ }
+
+                // 3) Reflection fallback for unknown POCO/Odin types - conservative and scoped
+                try
+                {
+                    var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                    Array arr = null;
+
+                    var t = parentTarget.GetType();
+                    var fi = t.GetField("hitFrames", flags);
+                    if (fi != null) arr = fi.GetValue(parentTarget) as Array;
+                    else
+                    {
+                        var pi = t.GetProperty("hitFrames", flags);
+                        if (pi != null && pi.CanRead) arr = pi.GetValue(parentTarget, null) as Array;
+                    }
+
+                    if (arr == null)
+                    {
+                        // scan fields/properties for an array with elements that have 'frame'
+                        foreach (var field in t.GetFields(flags))
+                        {
+                            try
+                            {
+                                var val = field.GetValue(parentTarget);
+                                if (val is Array a)
+                                {
+                                    var et = a.GetType().GetElementType();
+                                    if (et != null && (et.GetField("frame", flags) != null || et.GetProperty("frame", flags) != null))
+                                    {
+                                        arr = a; break;
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+
+                        if (arr == null)
+                        {
+                            foreach (var pinfo in t.GetProperties(flags))
                             {
                                 try
                                 {
-                                    var val = field.GetValue(parentTarget);
-                                    if (val == null) continue;
+                                    if (!pinfo.CanRead) continue;
+                                    var val = pinfo.GetValue(parentTarget, null);
                                     if (val is Array a)
                                     {
-                                        // Heuristic: element type contains a 'frame' member
                                         var et = a.GetType().GetElementType();
                                         if (et != null && (et.GetField("frame", flags) != null || et.GetProperty("frame", flags) != null))
                                         {
-                                            arrObj = a; break;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        var nestedFi = val.GetType().GetField("hitFrames", flags);
-                                        if (nestedFi != null)
-                                        {
-                                            var nestedArr = nestedFi.GetValue(val) as Array;
-                                            if (nestedArr != null) { arrObj = nestedArr; break; }
+                                            arr = a; break;
                                         }
                                     }
                                 }
                                 catch { }
                             }
-
-                            if (arrObj == null)
-                            {
-                                // Search properties
-                                foreach (var propInfo in parentTarget.GetType().GetProperties(flags))
-                                {
-                                    try
-                                    {
-                                        if (!propInfo.CanRead) continue;
-                                        var val = propInfo.GetValue(parentTarget, null);
-                                        if (val == null) continue;
-                                        if (val is Array a)
-                                        {
-                                            var et = a.GetType().GetElementType();
-                                            if (et != null && (et.GetField("frame", flags) != null || et.GetProperty("frame", flags) != null))
-                                            {
-                                                arrObj = a; break;
-                                            }
-                                        }
-                                        else
-                                        {
-                                            var nestedFi = val.GetType().GetField("hitFrames", flags);
-                                            if (nestedFi != null)
-                                            {
-                                                var nestedArr = nestedFi.GetValue(val) as Array;
-                                                if (nestedArr != null) { arrObj = nestedArr; break; }
-                                            }
-                                        }
-                                    }
-                                    catch { }
-                                }
-                            }
                         }
+                    }
 
-                        if (arrObj != null)
+                    if (arr != null)
+                    {
+                        for (int i = 0; i < arr.Length; i++)
                         {
-                            for (int i = 0; i < arrObj.Length; i++)
+                            var elem = arr.GetValue(i);
+                            if (elem == null) continue;
+                            int ef = -1;
+
+                            var fField = elem.GetType().GetField("frame", flags);
+                            if (fField != null)
                             {
-                                var elem = arrObj.GetValue(i);
-                                if (elem == null) continue;
-                                int elemFrame = -1;
-                                var fField = elem.GetType().GetField("frame", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                if (fField != null)
-                                {
-                                    var fv = fField.GetValue(elem);
-                                    if (fv is int iv) elemFrame = iv;
-                                    else if (fv is long lv) elemFrame = (int)lv;
-                                    else if (fv != null) { try { elemFrame = Convert.ToInt32(fv); } catch { elemFrame = -1; } }
-                                }
-                                else
-                                {
-                                    var pInfo = elem.GetType().GetProperty("frame", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                    if (pInfo != null)
-                                    {
-                                        var pv = pInfo.GetValue(elem, null);
-                                        if (pv is int piv) elemFrame = piv;
-                                        else if (pv is long plv) elemFrame = (int)plv;
-                                        else if (pv != null) { try { elemFrame = Convert.ToInt32(pv); } catch { elemFrame = -1; } }
-                                    }
-                                }
-
-                                if (elemFrame != frame) continue;
-
-                                // If the element has a 'shape' member, try to render it using reflection so POCO/Odin types show
-                                // at their intended local position. Otherwise draw a simple indicator at world origin.
-                                object shapeObj = null;
-                                var shapeField = elem.GetType().GetField("shape", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                if (shapeField != null) shapeObj = shapeField.GetValue(elem);
-                                else
-                                {
-                                    var shapeProp = elem.GetType().GetProperty("shape", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                    if (shapeProp != null) shapeObj = shapeProp.GetValue(elem, null);
-                                }
-
-                                if (shapeObj != null)
-                                {
-                                    DrawShape3DConfigPreviewFromReflection(shapeObj, parentTarget as GameObject);
-                                }
-                                else
-                                {
-                                    Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
-                                    Handles.DrawWireDisc(Vector3.zero, Vector3.up, 0.5f);
-                                    Handles.Label(Vector3.up * 0.6f, "HitFrame");
-                                }
-
-                                break;
+                                var fv = fField.GetValue(elem);
+                                if (fv is int iv) ef = iv;
+                                else if (fv is long lv) ef = (int)lv;
+                                else if (fv != null) { try { ef = Convert.ToInt32(fv); } catch { ef = -1; } }
                             }
+                            else
+                            {
+                                var fProp = elem.GetType().GetProperty("frame", flags);
+                                if (fProp != null)
+                                {
+                                    var pv = fProp.GetValue(elem, null);
+                                    if (pv is int piv) ef = piv;
+                                    else if (pv is long plv) ef = (int)plv;
+                                    else if (pv != null) { try { ef = Convert.ToInt32(pv); } catch { ef = -1; } }
+                                }
+                            }
+
+                            if (ef != frame) continue;
+
+                            object shapeObj = null;
+                            var shapeField = elem.GetType().GetField("shape", flags);
+                            if (shapeField != null) shapeObj = shapeField.GetValue(elem);
+                            else
+                            {
+                                var shapeProp = elem.GetType().GetProperty("shape", flags);
+                                if (shapeProp != null && shapeProp.CanRead) shapeObj = shapeProp.GetValue(elem, null);
+                            }
+
+                            if (shapeObj != null)
+                            {
+                                var ctx = ResolvePreviewRoot(parentTarget);
+                                DrawShape3DConfigPreviewFromReflection(shapeObj, ctx);
+                            }
+                            else
+                            {
+                                Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
+                                Handles.DrawWireDisc(Vector3.zero, Vector3.up, 0.5f);
+                                Handles.Label(Vector3.up * 0.6f, "HitFrame");
+                            }
+
+                            return;
                         }
                     }
-                    catch { }
-                    return;
                 }
-                for (int i = 0; i < prop.arraySize; i++)
-                {
-                    var elem = prop.GetArrayElementAtIndex(i);
-                    if (elem == null) continue;
-                    var frameProp = elem.FindPropertyRelative("frame");
-                    if (frameProp == null) continue;
-                    if (frameProp.intValue != frame) continue;
-
-                    var shapeProp = elem.FindPropertyRelative("shape");
-                    if (shapeProp != null && shapeProp.propertyType == SerializedPropertyType.Generic)
-                    {
-                        DrawShape3DConfigPreview(shapeProp, parentTarget as GameObject);
-                    }
-                    else
-                    {
-                        Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
-                        Handles.DrawWireDisc(Vector3.zero, Vector3.up, 0.5f);
-                        Handles.Label(Vector3.up * 0.6f, "HitFrame");
-                    }
-
-                    break;
-                }
+                catch { }
             }
             catch { }
         }
@@ -693,6 +711,122 @@ namespace EditorPlus.AnimationPreview
             }
             catch { return fallback; }
         }
+
+        private static int GetIntSafe(SerializedProperty prop, int fallback)
+        {
+            if (prop == null) return fallback;
+            try
+            {
+                switch (prop.propertyType)
+                {
+                    case SerializedPropertyType.Integer:
+                        return prop.intValue;
+                    case SerializedPropertyType.Enum:
+                        return prop.enumValueIndex;
+                    case SerializedPropertyType.Float:
+                        return Mathf.RoundToInt(prop.floatValue);
+                    case SerializedPropertyType.String:
+                        if (int.TryParse(prop.stringValue, out var r)) return r;
+                        return fallback;
+                    case SerializedPropertyType.Generic:
+                    {
+                        var raw = prop.FindPropertyRelative("RawValue") ?? prop.FindPropertyRelative("Value") ?? prop.FindPropertyRelative("m_RawValue") ?? prop.FindPropertyRelative("m_Value");
+                        if (raw != null)
+                        {
+                            switch (raw.propertyType)
+                            {
+                                case SerializedPropertyType.Integer: return raw.intValue;
+                                case SerializedPropertyType.Float: return Mathf.RoundToInt(raw.floatValue);
+                                case SerializedPropertyType.Enum: return raw.enumValueIndex;
+                                case SerializedPropertyType.String:
+                                    if (int.TryParse(raw.stringValue, out var rr)) return rr;
+                                    break;
+                            }
+                        }
+                        return fallback;
+                    }
+                    default:
+                        return fallback;
+                }
+            }
+            catch { return fallback; }
+        }
+
+        // Try to find a GameObject that serves as the preview root for the given target.
+        // Uses conservative reflection (editor-only) to avoid hard dependencies. Returns null if not found.
+        private static GameObject ResolvePreviewRoot(UnityEngine.Object parentTarget)
+        {
+            try
+            {
+                if (parentTarget == null) return null;
+                if (parentTarget is GameObject go) return go;
+
+                var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+                var t = parentTarget.GetType();
+                string[] names = new[] { "_tempPreviewGO", "tempPreviewGO", "_previewGO", "previewGO", "_previewRoot", "previewRoot" };
+
+                foreach (var name in names)
+                {
+                    try
+                    {
+                        var fi2 = t.GetField(name, flags | BindingFlags.Instance);
+                        if (fi2 != null)
+                        {
+                            var v = fi2.GetValue(parentTarget);
+                            if (v is GameObject gg) return gg;
+                        }
+                        var fsi = t.GetField(name, flags | BindingFlags.Static);
+                        if (fsi != null)
+                        {
+                            var vs = fsi.GetValue(null);
+                            if (vs is GameObject sgg) return sgg;
+                        }
+                        var pi = t.GetProperty(name, flags | BindingFlags.Instance);
+                        if (pi != null && pi.CanRead)
+                        {
+                            var pv = pi.GetValue(parentTarget, null);
+                            if (pv is GameObject pg) return pg;
+                        }
+                    }
+                    catch { }
+                }
+
+                // Search instance fields/properties for a GameObject or Component reference
+                try
+                {
+                    foreach (var field in t.GetFields(flags))
+                    {
+                        try
+                        {
+                            var val = field.GetValue(parentTarget);
+                            if (val is GameObject ggo) return ggo;
+                            if (val is Component comp) return comp.gameObject;
+                        }
+                        catch { }
+                    }
+
+                    foreach (var pinfo in t.GetProperties(flags))
+                    {
+                        try
+                        {
+                            if (!pinfo.CanRead) continue;
+                            var val = pinfo.GetValue(parentTarget, null);
+                            if (val is GameObject ggo) return ggo;
+                            if (val is Component comp) return comp.gameObject;
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+
+                // Last resort: named temporary preview object created by preview host
+                try { return GameObject.Find("__DashTempPreview__"); } catch { }
+                return null;
+            }
+            catch { }
+            return null;
+        }
+
     }
 }
 #endif
