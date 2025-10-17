@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System;
 using System.Reflection;
+using System.Collections.Generic;
 using Quantum;
 using Quantum.Physics3D;
 using UnityEngine;
@@ -10,6 +11,20 @@ namespace EditorPlus.AnimationPreview
 {
     internal static class PreviewRenderer
     {
+        // Shape editing state
+        private static ShapeEditContext _currentEditContext;
+        private static readonly List<ShapeEditContext> _visibleShapes = new List<ShapeEditContext>();
+
+        private struct ShapeEditContext
+        {
+            public UnityEngine.Object DataSource; // The AttackActionData or similar
+            public int HitFrameIndex; // Index in the hitFrames array
+            public Shape3DConfig Shape; // The shape config
+            public Bounds WorldBounds; // For selection testing
+            public Vector3 WorldPosition;
+            public Quaternion WorldRotation;
+            public GameObject ContextObject;
+        }
      
 
         public static void DrawShape3DConfigPreview(SerializedProperty shapeProp, GameObject context)
@@ -124,7 +139,7 @@ namespace EditorPlus.AnimationPreview
         }
 
         // Direct drawer for Quantum.Shape3DConfig (no reflection)
-        public static void DrawShape3DConfigPreview(Shape3DConfig config, GameObject context)
+        public static void DrawShape3DConfigPreview(Shape3DConfig config, GameObject context, bool isSelected = false)
         {
             try
             {
@@ -144,13 +159,17 @@ namespace EditorPlus.AnimationPreview
                     worldRot = t.rotation * rot;
                 }
 
+                // Use different color for selected shapes
+                Color shapeColor = isSelected ? new Color(1f, 1f, 0.25f, 0.8f) : new Color(1f, 0.25f, 0.25f, 0.6f);
+                Handles.color = shapeColor;
+
 #if QUANTUM_ENABLE_PHYSICS3D && !QUANTUM_DISABLE_PHYSICS3D
                 // Prefer Quantum's editor gizmo if available, but with correct position/rotation
-                var entry = new Quantum.QuantumGizmoEntry(new Color(1f, 0.25f, 0.25f, 0.6f));
+                var entry = new Quantum.QuantumGizmoEntry(shapeColor);
                 Quantum.QuantumUnityRuntime.DrawShape3DConfigGizmo(config, worldPos, worldRot, entry);
 #else
                 // Fallback: draw shape based on type when Quantum gizmos unavailable
-                Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
+                Handles.color = shapeColor;
                 
                 switch ((int)config.ShapeType)
                 {
@@ -233,18 +252,218 @@ namespace EditorPlus.AnimationPreview
         {
             try
             {
+                _visibleShapes.Clear();
+
                 if (parentTarget is Quantum.AttackActionData attackData)
                 {
-                    foreach (var hitFrame in attackData.hitFrames)
+                    for (int i = 0; i < attackData.hitFrames.Length; i++)
                     {
+                        var hitFrame = attackData.hitFrames[i];
                         if (hitFrame.frame == currentFrame)
                         {
-                            DrawShape3DConfigPreview(hitFrame.shape, context);
+                            var shapeContext = new ShapeEditContext
+                            {
+                                DataSource = parentTarget,
+                                HitFrameIndex = i,
+                                Shape = hitFrame.shape,
+                                ContextObject = context
+                            };
+
+                            // Calculate world bounds for selection
+                            CalculateShapeWorldBounds(hitFrame.shape, context, out shapeContext.WorldPosition, out shapeContext.WorldRotation, out shapeContext.WorldBounds);
+                            _visibleShapes.Add(shapeContext);
+
+                            // Draw the shape with selection highlighting
+                            bool isSelected = _currentEditContext.DataSource == parentTarget &&
+                                            _currentEditContext.HitFrameIndex == i;
+                            DrawShape3DConfigPreview(hitFrame.shape, context, isSelected);
                         }
                     }
                 }
+
+                // Shape interaction is now handled in SceneView.duringSceneGui before drawing
             }
             catch { }
+        }
+
+        private static void CalculateShapeWorldBounds(Shape3DConfig config, GameObject context, out Vector3 worldPos, out Quaternion worldRot, out Bounds bounds)
+        {
+            // Apply position and rotation offsets from the shape config
+            Vector3 pos = config.PositionOffset.ToUnityVector3();
+            Quaternion rot = Quaternion.Euler(config.RotationOffset.ToUnityVector3());
+
+            worldPos = pos;
+            worldRot = rot;
+            if (context != null)
+            {
+                var t = context.transform;
+                worldPos = t.TransformPoint(pos);
+                worldRot = t.rotation * rot;
+            }
+
+            // Calculate bounds based on shape type
+            bounds = new Bounds(worldPos, Vector3.one);
+
+            switch ((int)config.ShapeType)
+            {
+                case 1: // Sphere
+                    float sphereRadius = (float)config.SphereRadius;
+                    if (sphereRadius <= 0) sphereRadius = 0.5f;
+                    bounds = new Bounds(worldPos, Vector3.one * sphereRadius * 2);
+                    break;
+
+                case 2: // Box
+                    var boxExtents = config.BoxExtents.ToUnityVector3();
+                    if (boxExtents == Vector3.zero) boxExtents = Vector3.one * 0.5f;
+                    bounds = new Bounds(worldPos, boxExtents * 2);
+                    break;
+
+                case 3: // Capsule
+                    float capRadius = (float)config.CapsuleRadius;
+                    float capHeight = (float)config.CapsuleHeight;
+                    if (capRadius <= 0) capRadius = 0.25f;
+                    if (capHeight <= 0) capHeight = 1f;
+                    Vector3 capSize = new Vector3(capRadius * 2, capHeight, capRadius * 2);
+                    bounds = new Bounds(worldPos, capSize);
+                    break;
+            }
+        }
+
+        private static void HandleShapeInteraction()
+        {
+            Event e = Event.current;
+            if (e.type == EventType.MouseDown && e.button == 0 && !e.alt) // Left mouse button, not alt-dragging
+            {
+                // Check if clicking on a shape
+                Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
+                float closestDist = float.MaxValue;
+                ShapeEditContext? closestShape = null;
+
+                foreach (var shape in _visibleShapes)
+                {
+                    float hitDist;
+                    if (RayIntersectsShape(ray, shape, out hitDist))
+                    {
+                        if (hitDist < closestDist)
+                        {
+                            closestDist = hitDist;
+                            closestShape = shape;
+                        }
+                    }
+                }
+
+                if (closestShape.HasValue)
+                {
+                    _currentEditContext = closestShape.Value;
+                    // Only consume the event if not in preview mode to allow Inspector interaction
+                    if (_currentParentTarget == null)
+                    {
+                        e.Use();
+                    }
+                    SceneView.RepaintAll();
+                    GUIUtility.hotControl = GUIUtility.GetControlID(FocusType.Passive);
+                    Debug.Log($"Selected HitFrame shape at index {closestShape.Value.HitFrameIndex}");
+                }
+                else
+                {
+                    _currentEditContext = default;
+                    SceneView.RepaintAll();
+                }
+            }
+
+            // Show transform handles for selected shape
+            if (_currentEditContext.DataSource != null)
+            {
+                DrawShapeTransformHandles(_currentEditContext);
+            }
+        }
+
+        private static bool RayIntersectsShape(Ray ray, ShapeEditContext shape, out float hitDistance)
+        {
+            hitDistance = float.MaxValue;
+
+            // For selection, we'll use a simpler approach: check if ray intersects the shape's bounding box
+            // This is more reliable than complex ray-shape intersection for editor interaction
+
+            // Transform ray to world space first, then check against world bounds
+            Bounds worldBounds = shape.WorldBounds;
+
+            // Expand bounds slightly for easier selection
+            worldBounds.Expand(0.1f);
+
+            return worldBounds.IntersectRay(ray, out hitDistance);
+        }
+
+        private static void DrawShapeTransformHandles(ShapeEditContext context)
+        {
+            Debug.Log($"Drawing transform handles for shape at {context.WorldPosition}");
+
+            // Use Unity's built-in transform handles in world space
+            EditorGUI.BeginChangeCheck();
+
+            // Position handle - work in world space
+            Vector3 newWorldPos = Handles.PositionHandle(context.WorldPosition, context.WorldRotation);
+
+            // Rotation handle - work in world space
+            Quaternion newWorldRot = Handles.RotationHandle(context.WorldRotation, context.WorldPosition);
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                Debug.Log($"Transform changed: pos {context.WorldPosition} -> {newWorldPos}, rot {context.WorldRotation} -> {newWorldRot}");
+
+                // Record undo
+                Undo.RecordObject(context.DataSource, "Edit HitFrame Shape");
+
+                // Convert the new world transform back to local space for storage
+                Vector3 newLocalPos = newWorldPos;
+                Quaternion newLocalRot = newWorldRot;
+
+                if (context.ContextObject != null)
+                {
+                    var t = context.ContextObject.transform;
+                    newLocalPos = t.InverseTransformPoint(newWorldPos);
+                    newLocalRot = Quaternion.Inverse(t.rotation) * newWorldRot;
+                }
+
+                // Update the shape data
+                if (context.DataSource is Quantum.AttackActionData attackData)
+                {
+                    var hitFrame = attackData.hitFrames[context.HitFrameIndex];
+                    var shape = hitFrame.shape;
+
+                    // Convert back to FP types
+                    shape.PositionOffset = newLocalPos.ToFPVector3();
+                    Vector3 eulerAngles = newLocalRot.eulerAngles;
+                    shape.RotationOffset = eulerAngles.ToFPVector3();
+
+                    // Update the array
+                    hitFrame.shape = shape;
+                    attackData.hitFrames[context.HitFrameIndex] = hitFrame;
+
+                    // Mark as dirty
+                    EditorUtility.SetDirty(context.DataSource);
+
+                    Debug.Log($"Updated shape data: pos {shape.PositionOffset}, rot {shape.RotationOffset}");
+                }
+
+                // Update the context with new world transform
+                Bounds updatedBounds = context.WorldBounds;
+                updatedBounds.center = newWorldPos; // Update bounds center to new position
+
+                _currentEditContext = new ShapeEditContext
+                {
+                    DataSource = context.DataSource,
+                    HitFrameIndex = context.HitFrameIndex,
+                    Shape = context.Shape,
+                    WorldBounds = updatedBounds,
+                    WorldPosition = newWorldPos,
+                    WorldRotation = newWorldRot,
+                    ContextObject = context.ContextObject
+                };
+
+                // Refresh the scene view
+                SceneView.RepaintAll();
+            }
         }
 
         private static float GetFloatSafe(SerializedProperty prop, float fallback)
@@ -371,6 +590,10 @@ namespace EditorPlus.AnimationPreview
         {
             if (_currentParentTarget != null && _currentContext != null)
             {
+                // Handle shape interaction first (before drawing)
+                HandleShapeInteraction();
+
+                // Then draw the preview
                 DrawHitFramesPreviewInternal(_currentParentTarget, _currentFrame, _currentContext);
             }
         };

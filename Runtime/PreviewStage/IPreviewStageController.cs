@@ -13,6 +13,7 @@ namespace EditorPlus.AnimationPreview
     public interface IPreviewStageController
     {
         void Open(GameObject target);
+        void Open(GameObject target, UnityEngine.Object asset);
         void Close();
         bool TryGetStageScene(out Scene scene);
     }

@@ -147,7 +147,7 @@ namespace EditorPlus.AnimationPreview
             // warning if the Prefab is invalid or missing.
             try
             {
-                AnimationPreviewStageBridge.Open(root);
+                AnimationPreviewStageBridge.Open(root, host);
             }
             catch { }
 
