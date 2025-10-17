@@ -60,7 +60,8 @@ namespace EditorPlus.AnimationPreview
             string label = member.Name;
             string colorHex = null;
             int order = 0;
-            ProviderUtils.ExtractAttributeData(animationEventAttributeInstance, ref label, ref colorHex, ref order);
+            string previewName = null;
+            ProviderUtils.ExtractAttributeData(animationEventAttributeInstance, ref label, ref colorHex, ref order, ref previewName);
 
             // Use provider-level default color (int-array provider targets int[] members).
             var color = AnimationPreviewDrawer.ParseHexOrDefault(colorHex, DefaultColor);
@@ -68,6 +69,7 @@ namespace EditorPlus.AnimationPreview
             {
                 Member = member,
                 Label = label,
+                PreviewName = previewName,
                 ValueType = valueType,
                 Color = color,
                 Getter = getter,

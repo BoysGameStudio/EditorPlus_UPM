@@ -9,20 +9,20 @@ namespace EditorPlus.AnimationPreview
     /// </summary>
     public static class TimelineAPI
     {
-        public delegate void DrawTimelineDelegate(Object parentTarget, AnimationClip clip, float? minHeightOverride, bool includeFrameEventsInspector, bool addTopSpacing);
+    public delegate void DrawTimelineDelegate(Object parentTarget, AnimationClip clip, float? minHeightOverride, bool includeFrameEventsInspector, bool addTopSpacing, string previewName);
 
         /// <summary>Set by the Editor assembly at load time.</summary>
         public static DrawTimelineDelegate DrawTimelineHook;
 
         /// <summary>Try to draw the timeline using the registered hook (if any).</summary>
-        public static bool TryDrawTimeline(Object parentTarget, AnimationClip clip, float? minHeightOverride = null, bool includeFrameEventsInspector = true, bool addTopSpacing = true)
+        public static bool TryDrawTimeline(Object parentTarget, AnimationClip clip, float? minHeightOverride = null, bool includeFrameEventsInspector = true, bool addTopSpacing = true, string previewName = null)
         {
             var d = DrawTimelineHook;
             if (d == null || clip == null || parentTarget == null)
             {
                 return false;
             }
-            d(parentTarget, clip, minHeightOverride, includeFrameEventsInspector, addTopSpacing);
+            d(parentTarget, clip, minHeightOverride, includeFrameEventsInspector, addTopSpacing, previewName);
             return true;
         }
     }

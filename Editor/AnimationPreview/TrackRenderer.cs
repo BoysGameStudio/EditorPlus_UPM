@@ -14,7 +14,11 @@ namespace EditorPlus.AnimationPreview
     {
         public static void DrawTracks(UnityEngine.Object parentTarget, Rect tracksRect, TimelineState st, float fps, int totalFrames)
         {
-            var members = GetTrackMembers(parentTarget);
+            // Determine preview scope for this draw (if available)
+            string previewName = null;
+            try { previewName = TimelineContext.GetPreviewNameForTarget(parentTarget); } catch { previewName = null; }
+
+            var members = GetTrackMembers(parentTarget, previewName);
             float rowH = TimelineContext.TrackRowHeight;
 
             float currentY = tracksRect.y;
@@ -37,7 +41,7 @@ namespace EditorPlus.AnimationPreview
             
         }
 
-        public static TrackMember[] GetTrackMembers(UnityEngine.Object target)
+        public static TrackMember[] GetTrackMembers(UnityEngine.Object target, string previewName = null)
         {
             if (target == null) return Array.Empty<TrackMember>();
             var type = target.GetType();
@@ -57,6 +61,20 @@ namespace EditorPlus.AnimationPreview
                 try { UnityEngine.Debug.Log($"[TrackRenderer] Built {cached.Length} TrackMembers for {type.Name}"); } catch { }
                 TimelineContext.TrackMembersCache[type] = cached;
             }
+            // If previewName filtering requested, return subset matching PreviewName or unscoped members
+            if (!string.IsNullOrEmpty(previewName))
+            {
+                var list = new System.Collections.Generic.List<TrackMember>();
+                foreach (var tm in cached)
+                {
+                    if (string.IsNullOrEmpty(tm.PreviewName) || string.Equals(tm.PreviewName, previewName, StringComparison.Ordinal))
+                    {
+                        list.Add(tm);
+                    }
+                }
+                return list.ToArray();
+            }
+
             return cached;
         }
 

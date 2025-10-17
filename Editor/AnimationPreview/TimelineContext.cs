@@ -35,6 +35,22 @@ namespace EditorPlus.AnimationPreview
             }
         }
 
+        // Simple stack-based preview name context so DrawTimeline callers can scope which
+        // tracks should be shown for the currently-drawn clip. PushPreviewName should be
+        // called before drawing and PopPreviewName after drawing to restore state.
+        private static readonly Stack<string> s_PreviewNameStack = new Stack<string>(4);
+
+        public static void PushPreviewName(string name) => s_PreviewNameStack.Push(name);
+        public static void PopPreviewName()
+        {
+            if (s_PreviewNameStack.Count > 0) s_PreviewNameStack.Pop();
+        }
+
+        public static string GetPreviewNameForTarget(UnityEngine.Object target)
+        {
+            return s_PreviewNameStack.Count > 0 ? s_PreviewNameStack.Peek() : null;
+        }
+
         public static int CombineControlSeed(int seed, int index)
         {
             unchecked

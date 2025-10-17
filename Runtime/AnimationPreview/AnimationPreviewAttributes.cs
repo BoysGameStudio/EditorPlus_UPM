@@ -25,12 +25,16 @@ public sealed class AnimationEventAttribute : Attribute // Rename to TimelineTra
     public string Label { get; }
     public string ColorHex { get; }
     public int Order { get; }
+    // Optional: logical name of the AnimationPreview field this track belongs to.
+    // If null or empty, the track is considered unscoped and will be shown for all previews.
+    public string PreviewName { get; }
 
-    public AnimationEventAttribute(string label = null, string colorHex = null, int order = 0)
+    public AnimationEventAttribute(string label = null, string colorHex = null, int order = 0, string previewName = null)
     {
         Label = label;
         ColorHex = colorHex;
         Order = order;
+        PreviewName = previewName;
     }
 }
 

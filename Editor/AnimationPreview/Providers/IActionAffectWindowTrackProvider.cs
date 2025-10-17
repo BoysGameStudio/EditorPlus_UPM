@@ -67,7 +67,8 @@ namespace EditorPlus.AnimationPreview
             string label = member.Name;
             string colorHex = null;
             int order = 0;
-            ProviderUtils.ExtractAttributeData(animationEventAttributeInstance, ref label, ref colorHex, ref order);
+            string previewName = null;
+            ProviderUtils.ExtractAttributeData(animationEventAttributeInstance, ref label, ref colorHex, ref order, ref previewName);
 
             // Use provider-level default color. The provider targets IActionAffectWindow-like types
             // so the class DefaultColor is a reasonable default. Attribute hex may override it.
@@ -76,6 +77,7 @@ namespace EditorPlus.AnimationPreview
             {
                 Member = member,
                 Label = label,
+                PreviewName = previewName,
                 ValueType = valueType,
                 Color = color,
                 Getter = getter,

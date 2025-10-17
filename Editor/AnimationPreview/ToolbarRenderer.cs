@@ -32,6 +32,48 @@ namespace EditorPlus.AnimationPreview
                 }
                 GUILayout.Label(frameInfo, GUILayout.Width(200));
 
+                // Play / Pause / Stop controls (works for hosts implementing IAnimationPreviewHost via
+                // ActiveActionIntegration and for arbitrary objects via InlinePreviewManager).
+                bool hasHostPreview = ActiveActionIntegration.HasPreview(parentTarget);
+                bool hasInlinePreview = InlinePreviewManager.HasPreview(parentTarget);
+                bool isPlaying = false;
+                if (hasHostPreview)
+                {
+                    isPlaying = ActiveActionIntegration.IsPreviewPlaying(parentTarget);
+                }
+                else if (hasInlinePreview)
+                {
+                    isPlaying = InlinePreviewManager.IsPlaying(parentTarget);
+                }
+
+                var playLabel = isPlaying ? "Pause" : "Play";
+                if (GUILayout.Button(playLabel, EditorStyles.toolbarButton, GUILayout.Width(64)))
+                {
+                    if (hasHostPreview)
+                    {
+                        ActiveActionIntegration.SetPlaying(parentTarget, !isPlaying);
+                    }
+                    else
+                    {
+                        // Ensure inline preview exists and toggle play state
+                        InlinePreviewManager.EnsurePreview(parentTarget, clip, resetTime: false, fps: fps);
+                        InlinePreviewManager.SetPlaying(parentTarget, !isPlaying);
+                    }
+                }
+
+                if (GUILayout.Button("Stop", EditorStyles.toolbarButton, GUILayout.Width(48)))
+                {
+                    if (hasHostPreview)
+                    {
+                        ActiveActionIntegration.SetPlaying(parentTarget, false);
+                        ActiveActionIntegration.TrySyncPlayerClip(parentTarget, resetTime: true);
+                    }
+                    else
+                    {
+                        InlinePreviewManager.Stop(parentTarget);
+                    }
+                }
+
                 GUILayout.Label("Zoom", GUILayout.Width(40));
                 st.Zoom = GUILayout.HorizontalSlider(st.Zoom, 0.25f, 6f, GUILayout.Width(120));
                 st.Zoom = Mathf.Clamp(st.Zoom, 0.25f, 6f);

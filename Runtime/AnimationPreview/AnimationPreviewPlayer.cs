@@ -214,13 +214,30 @@ public class AnimationPreviewPlayer : MonoBehaviour
 
     private void EnsureModelAndAnimator()
     {
+        // Spawn assigned prefab if present
         if (!_spawnedModel && modelPrefab != null)
         {
             _spawnedModel = (GameObject)PrefabUtility.InstantiatePrefab(modelPrefab, transform);
             _spawnedModel.name = modelPrefab.name;
         }
+
+        // If no animator found in children, ensure there is a fallback Animator on the player root
         if (animator == null)
+        {
             animator = GetComponentInChildren<Animator>(true);
+            if (animator == null)
+            {
+                // Create or reuse an Animator on this GameObject so the PlayableGraph has a valid target
+                var existing = GetComponent<Animator>();
+                if (existing == null)
+                {
+                    existing = gameObject.AddComponent<Animator>();
+                    // Keep the animator disabled by default; it is only used as a target for sampling
+                    existing.enabled = false;
+                }
+                animator = existing;
+            }
+        }
         if (_graph.IsValid() && _animator && !_output.IsOutputValid())
         {
             _output = AnimationPlayableOutput.Create(_graph, "Out", _animator);

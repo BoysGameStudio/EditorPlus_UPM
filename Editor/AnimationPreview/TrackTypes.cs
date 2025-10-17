@@ -9,6 +9,8 @@ namespace EditorPlus.AnimationPreview
     {
         public MemberInfo Member;
         public string Label;
+        // Optional preview name this track belongs to (matches AnimationEventAttribute.PreviewName)
+        public string PreviewName;
         public Type ValueType;
         public Color Color;
         public Func<UnityEngine.Object, object> Getter;

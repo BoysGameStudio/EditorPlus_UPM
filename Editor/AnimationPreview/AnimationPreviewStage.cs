@@ -9,7 +9,6 @@ using UnityEditor.Experimental.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using EditorPlus.AnimationPreview;
-using EditorPlus.AnimationPreview;
 using UnityEngine.Rendering;
 
 public class AnimationPreviewStage : PreviewSceneStage
@@ -22,9 +21,9 @@ public class AnimationPreviewStage : PreviewSceneStage
     private static readonly Vector4[] OutlineUpload = BuildUploadBuffer();
     private static readonly PaletteEntry[] EmptyPalette = Array.Empty<PaletteEntry>();
 
-    private readonly Transform _originalParentTransform;
-    private readonly int _originalSiblingIndex = -1;
-    private readonly Scene _originalScene;
+    private Transform _originalParentTransform;
+    private int _originalSiblingIndex = -1;
+    private Scene _originalScene;
     public GameObject Target;
     private GameObject _stageInstance; // preview instance created in the stage (when using Prefab)
     private bool _movedOriginal;       // whether we moved the original object into the stage
@@ -92,11 +91,47 @@ public class AnimationPreviewStage : PreviewSceneStage
             }
             else
             {
-                // Record original placement to restore later
-                // Strict prefab-only: do not move original; preview will be skipped until a valid prefab is provided
-                _movedOriginal = false;
-                _previewRoot = null;
-                Debug.LogWarning("[Preview] No valid character Prefab found on UniversalAnimPlayer.modelPrefab. Please assign a Prefab with a SkinnedMeshRenderer.");
+                // If prefab instantiation failed, fall back to moving the provided target into the stage
+                // so the preview scene contains the preview root and the player can be inspected.
+                try
+                {
+                    _originalScene = Target.scene;
+                    _originalParentTransform = Target.transform.parent;
+                    _originalSiblingIndex = Target.transform.GetSiblingIndex();
+                    SceneManager.MoveGameObjectToScene(Target, scene);
+                    _movedOriginal = true;
+                    _previewRoot = Target;
+                    Selection.activeObject = Target;
+
+                    // Ensure binder and depth-only materials are applied to the moved original
+                    EnsurePreviewBinder(_previewRoot);
+                    ApplyDepthOnlyToPreviewRenderers(_previewRoot);
+
+                    // Re-route player's animator to any animator on the moved original
+                    _playerInstance = Target ? Target.GetComponent<AnimationPreviewPlayer>() : null;
+                    if (_playerInstance != null)
+                    {
+                        var instAnimator = _previewRoot.GetComponentInChildren<Animator>(true);
+                        if (instAnimator != null)
+                        {
+                            _playerInstance.animator = instAnimator;
+                        }
+                        else
+                        {
+                            Debug.LogWarning("[Preview] The preview object has no Animator; animation may not play.");
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogWarning("[Preview] No AnimationPreviewPlayer found on Target. Preview may be limited.");
+                    }
+                }
+                catch (Exception)
+                {
+                    _movedOriginal = false;
+                    _previewRoot = null;
+                    Debug.LogWarning("[Preview] Failed to move target into preview stage. Please assign a valid Prefab with SkinnedMeshRenderer.");
+                }
             }
         }
 
@@ -367,7 +402,7 @@ public class AnimationPreviewStage : PreviewSceneStage
                     return;
                 }
                 featureInstance.name = "OutlineFeature";
-                featureInstance.hideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector;
+                // featureInstance.hideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector;
                 AssetDatabase.AddObjectToAsset(featureInstance, rendererData);
                 // Use SerializedObject to append to m_RendererFeatures to avoid YAML block assertion issues
                 if (!AddFeatureToRendererDataSerialized(rendererData, featureInstance))
@@ -606,12 +641,12 @@ public class AnimationPreviewStage : PreviewSceneStage
             return false;
         }
 
-        const HideFlags desiredHideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector;
-        if (featureInstance.hideFlags != desiredHideFlags)
-        {
-            featureInstance.hideFlags = desiredHideFlags;
-            dirty = true;
-        }
+        // const HideFlags desiredHideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector;
+        // if (featureInstance.hideFlags != desiredHideFlags)
+        // {
+        //     featureInstance.hideFlags = desiredHideFlags;
+        //     dirty = true;
+        // }
 
         var featureType = featureInstance.GetType();
         var settingsProperty = featureType.GetProperty("FeatureSettings", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
