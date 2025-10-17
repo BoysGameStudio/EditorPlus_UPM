@@ -21,27 +21,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
 
     protected override void DrawPropertyLayout(GUIContent label)
     {
-
         this.CallNextDrawer(label);
-
-        var clip = this.ValueEntry.SmartValue;
-        if (clip == null)
-        {
-            SirenixEditorGUI.WarningMessageBox("No AnimationClip assigned.");
-            return;
-        }
-
-        var parentTarget = ResolveOwningUnityObject(); // the object that owns the field (ScriptableObject/MonoBehaviour)
-        if (parentTarget == null)
-        {
-            SirenixEditorGUI.ErrorMessageBox("Timeline needs a Unity object parent (ScriptableObject/MonoBehaviour).");
-            return;
-        }
-
-        float? minHeightOverride = Attribute != null && Attribute.Height > 0f ? Attribute.Height : (float?)null;
-        // Use the property name as the preview identifier so multiple AnimationPreview fields can be distinguished
-        var previewName = this.Property?.Name;
-        DrawTimeline(parentTarget, clip, minHeightOverride, includeFrameEventsInspector: true, addTopSpacing: true, previewName: previewName);
     }
 
     // Initialization for editor runtime used to be here (hook registration).
