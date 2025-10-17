@@ -34,7 +34,7 @@ namespace EditorPlus.AnimationPreview
             var lineRect = new Rect(x - 0.5f, tracksRect.y, 1.5f, tracksRect.height);
             EditorGUI.DrawRect(lineRect, new Color(1f, 0.85f, 0.2f, 0.9f));
             // Delegate hit frame preview rendering
-            // PreviewRenderer.DrawHitFramesPreview(parentTarget, frame);
+            PreviewRenderer.DrawHitFramesPreview(parentTarget, frame);
         }
     }
 }

@@ -131,19 +131,118 @@ namespace EditorPlus.AnimationPreview
                 // If config is default/empty, draw nothing
                 if (config.Equals(default(Shape3DConfig))) return;
 
+                // Apply position and rotation offsets from the shape config
+                Vector3 pos = config.PositionOffset.ToUnityVector3();
+                Quaternion rot = Quaternion.Euler(config.RotationOffset.ToUnityVector3());
+
+                Vector3 worldPos = pos;
+                Quaternion worldRot = rot;
+                if (context != null)
+                {
+                    var t = context.transform;
+                    worldPos = t.TransformPoint(pos);
+                    worldRot = t.rotation * rot;
+                }
+
 #if QUANTUM_ENABLE_PHYSICS3D && !QUANTUM_DISABLE_PHYSICS3D
-                // Prefer Quantum's editor gizmo if available
-                Vector3 position = context != null ? context.transform.position : Vector3.zero;
-                Quaternion rotation = context != null ? context.transform.rotation : Quaternion.identity;
+                // Prefer Quantum's editor gizmo if available, but with correct position/rotation
                 var entry = new Quantum.QuantumGizmoEntry(new Color(1f, 0.25f, 0.25f, 0.6f));
-                Quantum.QuantumUnityRuntime.DrawShape3DConfigGizmo(config, position, rotation, entry);
+                Quantum.QuantumUnityRuntime.DrawShape3DConfigGizmo(config, worldPos, worldRot, entry);
 #else
-                // Fallback: draw a simple conservative placeholder at the preview root
+                // Fallback: draw shape based on type when Quantum gizmos unavailable
                 Handles.color = new Color(1f, 0.25f, 0.25f, 0.6f);
-                Vector3 worldPos = context != null ? context.transform.position : Vector3.zero;
-                Handles.DrawWireDisc(worldPos, Vector3.up, 0.5f);
-                Handles.Label(worldPos + Vector3.up * 0.6f, "HitFrame");
+                
+                switch ((int)config.ShapeType)
+                {
+                    case 1: // Sphere
+                    {
+                        float radius = (float)config.SphereRadius;
+                        if (radius <= 0) radius = 0.5f;
+                        Handles.DrawWireDisc(worldPos, worldRot * Vector3.up, radius);
+                        Handles.DrawWireDisc(worldPos, worldRot * Vector3.right, radius);
+                        Handles.DrawWireDisc(worldPos, worldRot * Vector3.forward, radius);
+                        Handles.Label(worldPos + worldRot * Vector3.up * (radius + 0.1f), "HitFrame(Sphere)");
+                        break;
+                    }
+
+                    case 2: // Box
+                    {
+                        var extents = config.BoxExtents.ToUnityVector3();
+                        if (extents == Vector3.zero) extents = Vector3.one * 0.5f;
+                        var verts = new Vector3[8];
+                        var half = extents;
+                        verts[0] = worldPos + worldRot * new Vector3(-half.x, -half.y, -half.z);
+                        verts[1] = worldPos + worldRot * new Vector3(half.x, -half.y, -half.z);
+                        verts[2] = worldPos + worldRot * new Vector3(half.x, -half.y, half.z);
+                        verts[3] = worldPos + worldRot * new Vector3(-half.x, -half.y, half.z);
+                        verts[4] = worldPos + worldRot * new Vector3(-half.x, half.y, -half.z);
+                        verts[5] = worldPos + worldRot * new Vector3(half.x, half.y, -half.z);
+                        verts[6] = worldPos + worldRot * new Vector3(half.x, half.y, half.z);
+                        verts[7] = worldPos + worldRot * new Vector3(-half.x, half.y, half.z);
+
+                        Handles.DrawLine(verts[0], verts[1]); Handles.DrawLine(verts[1], verts[2]); Handles.DrawLine(verts[2], verts[3]); Handles.DrawLine(verts[3], verts[0]);
+                        Handles.DrawLine(verts[4], verts[5]); Handles.DrawLine(verts[5], verts[6]); Handles.DrawLine(verts[6], verts[7]); Handles.DrawLine(verts[7], verts[4]);
+                        Handles.DrawLine(verts[0], verts[4]); Handles.DrawLine(verts[1], verts[5]); Handles.DrawLine(verts[2], verts[6]); Handles.DrawLine(verts[3], verts[7]);
+                        Handles.Label(worldPos + worldRot * Vector3.up * (half.y + 0.1f), "HitFrame(Box)");
+                        break;
+                    }
+
+                    case 3: // Capsule
+                    {
+                        float radius = (float)config.CapsuleRadius;
+                        float height = (float)config.CapsuleHeight;
+                        if (radius <= 0) radius = 0.25f;
+                        if (height <= 0) height = 1f;
+                        float halfHeight = Mathf.Max(0f, (height - 2f * radius) * 0.5f);
+                        Vector3 up = worldRot * Vector3.up;
+                        var top = worldPos + up * halfHeight;
+                        var bot = worldPos - up * halfHeight;
+                        Handles.DrawWireDisc(top, worldRot * Vector3.up, radius);
+                        Handles.DrawWireDisc(bot, worldRot * Vector3.up, radius);
+                        // draw simple connecting lines (approx cylinder)
+                        Handles.DrawLine(top + worldRot * Vector3.right * radius, bot + worldRot * Vector3.right * radius);
+                        Handles.DrawLine(top - worldRot * Vector3.right * radius, bot - worldRot * Vector3.right * radius);
+                        Handles.DrawLine(top + worldRot * Vector3.forward * radius, bot + worldRot * Vector3.forward * radius);
+                        Handles.DrawLine(top - worldRot * Vector3.forward * radius, bot - worldRot * Vector3.forward * radius);
+                        Handles.Label(worldPos + up * (halfHeight + radius + 0.05f), "HitFrame(Capsule)");
+                        break;
+                    }
+
+                    default:
+                    {
+                        Handles.DrawWireDisc(worldPos, Vector3.up, 0.5f);
+                        Handles.Label(worldPos + Vector3.up * 0.6f, "HitFrame");
+                        break;
+                    }
+                }
 #endif
+            }
+            catch { }
+        }
+
+        public static void DrawHitFramesPreview(UnityEngine.Object parentTarget, int currentFrame)
+        {
+            if (parentTarget == null) return;
+
+            _currentParentTarget = parentTarget;
+            _currentFrame = currentFrame;
+            _currentContext = ResolvePreviewRoot(parentTarget);
+        }
+
+        private static void DrawHitFramesPreviewInternal(UnityEngine.Object parentTarget, int currentFrame, GameObject context)
+        {
+            try
+            {
+                if (parentTarget is Quantum.AttackActionData attackData)
+                {
+                    foreach (var hitFrame in attackData.hitFrames)
+                    {
+                        if (hitFrame.frame == currentFrame)
+                        {
+                            DrawShape3DConfigPreview(hitFrame.shape, context);
+                        }
+                    }
+                }
             }
             catch { }
         }
@@ -261,6 +360,21 @@ namespace EditorPlus.AnimationPreview
             try { return GameObject.Find("__DashTempPreview__"); } catch { }
             return null;
         }
+
+    private static UnityEngine.Object _currentParentTarget;
+    private static int _currentFrame;
+    private static GameObject _currentContext;
+
+    static PreviewRenderer()
+    {
+        SceneView.duringSceneGui += sv =>
+        {
+            if (_currentParentTarget != null && _currentContext != null)
+            {
+                DrawHitFramesPreviewInternal(_currentParentTarget, _currentFrame, _currentContext);
+            }
+        };
+    }
 
     }
 }
