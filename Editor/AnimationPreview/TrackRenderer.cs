@@ -14,13 +14,9 @@ namespace EditorPlus.AnimationPreview
     {
         public static void DrawTracks(UnityEngine.Object parentTarget, Rect tracksRect, TimelineState st, float fps, int totalFrames)
         {
-            // Determine preview scope for this draw (if available)
-            string previewName = null;
-            try { previewName = TimelineContext.GetPreviewNameForTarget(parentTarget); } catch { previewName = null; }
-
+            string previewName = TimelineContext.GetPreviewNameForTarget(parentTarget);
             var members = GetTrackMembers(parentTarget, previewName);
             float rowH = TimelineContext.TrackRowHeight;
-
             float currentY = tracksRect.y;
 
             for (int i = 0; i < members.Length; i++)
@@ -37,34 +33,27 @@ namespace EditorPlus.AnimationPreview
                 var content = new Rect(tracksRect.x + TimelineContext.TimelineLabelWidth, row.y + 4, tracksRect.width - TimelineContext.TimelineLabelWidth - 8, row.height - 8);
                 DrawSingleTrack(parentTarget, tm, content, st, totalFrames);
             }
-
-            
         }
 
         public static TrackMember[] GetTrackMembers(UnityEngine.Object target, string previewName = null)
         {
             if (target == null) return Array.Empty<TrackMember>();
             var type = target.GetType();
-            // If no providers were registered yet (possible during domain reload ordering), ensure registration
+
             if (s_Providers.Count == 0)
             {
-                try { AutoRegisterProviders(); } catch { }
+                AutoRegisterProviders();
             }
 
             if (!TimelineContext.TrackMembersCache.TryGetValue(type, out var cached))
             {
-                // Use registered providers to build TrackMembers. Providers are responsible for
-                // attribute-driven reflection or typed logic. If no provider handles the type, return empty.
-                var beforeProviders = s_Providers.Count;
-                try { UnityEngine.Debug.Log($"[TrackRenderer] Building TrackMembers for type {type.Name}, providers={beforeProviders}"); } catch { }
-                cached = BuildTrackMembersForType_TypedFirst(type) ?? Array.Empty<TrackMember>();
-                try { UnityEngine.Debug.Log($"[TrackRenderer] Built {cached.Length} TrackMembers for {type.Name}"); } catch { }
+                cached = BuildTrackMembersForType(type) ?? Array.Empty<TrackMember>();
                 TimelineContext.TrackMembersCache[type] = cached;
             }
-            // If previewName filtering requested, return subset matching PreviewName or unscoped members
+
             if (!string.IsNullOrEmpty(previewName))
             {
-                var list = new System.Collections.Generic.List<TrackMember>();
+                var list = new List<TrackMember>();
                 foreach (var tm in cached)
                 {
                     if (string.IsNullOrEmpty(tm.PreviewName) || string.Equals(tm.PreviewName, previewName, StringComparison.Ordinal))
@@ -78,10 +67,7 @@ namespace EditorPlus.AnimationPreview
             return cached;
         }
 
-        // Try to build track members using registered providers.
-        // For each member that has an AnimationEventAttribute, call providers in order and accept the
-        // first TrackMember produced. Returns null if no members were produced.
-        private static TrackMember[] BuildTrackMembersForType_TypedFirst(Type type)
+        private static TrackMember[] BuildTrackMembersForType(Type type)
         {
             if (type == null) return null;
             var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -89,28 +75,21 @@ namespace EditorPlus.AnimationPreview
 
             foreach (var member in type.GetMembers(flags))
             {
-                // find any attribute instance named AnimationEventAttribute (assembly mismatches may exist)
                 var attrs = member.GetCustomAttributes(false);
-                object animAttr = null;
-                foreach (var a in attrs) if (a != null && a.GetType().Name == "AnimationEventAttribute") { animAttr = a; break; }
+                var animAttr = attrs.FirstOrDefault(a => a.GetType().Name == "AnimationEventAttribute");
                 if (animAttr == null) continue;
 
-                // For this attributed member, ask each provider to build a single TrackMember
                 foreach (var p in s_Providers)
                 {
-                    try
+                    if (!p.CanHandle(type)) continue;
+                    var tmOpt = p.Build(member, animAttr);
+                    if (tmOpt.HasValue)
                     {
-                        if (!p.CanHandle(type)) continue;
-                        var tmOpt = p.Build(member, animAttr);
-                        if (tmOpt.HasValue)
-                        {
-                            var tm = tmOpt.Value;
-                            result.Add(tm);
-                            try { s_ProviderByMember[member] = p; } catch { }
-                            break; // move to next member once one provider handled it
-                        }
+                        var tm = tmOpt.Value;
+                        result.Add(tm);
+                        s_ProviderByMember[member] = p;
+                        break;
                     }
-                    catch { }
                 }
             }
 
@@ -119,121 +98,67 @@ namespace EditorPlus.AnimationPreview
             return result.ToArray();
         }
 
-
-        // Public provider interface so external editor extensions can register track providers.
         public interface ITrackProvider
         {
             bool CanHandle(Type t);
-            // Build a TrackMember for a single member (or return null if this provider doesn't handle it)
-            TrackMember? Build(System.Reflection.MemberInfo member, object animationEventAttributeInstance);
+            TrackMember? Build(MemberInfo member, object animationEventAttributeInstance);
         }
 
-            // Optional interface providers can implement to handle custom drawing for their TrackMembers
-            public interface ICustomTrackDrawer
-            {
-                // Draw the given TrackMember into rect for the target object
-                void Draw(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames);
-            }
+        public interface ICustomTrackDrawer
+        {
+            void Draw(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames);
+        }
 
-        // Provider registry for open-closed extensibility. Providers should register themselves
-        // via TrackRenderer.RegisterTrackProvider (e.g. Providers/*.cs files).
         private static readonly List<ITrackProvider> s_Providers = new List<ITrackProvider>();
-    // Mapping from MemberInfo to the provider that created its TrackMember (populated during Build)
-    private static readonly Dictionary<MemberInfo, ITrackProvider> s_ProviderByMember = new Dictionary<MemberInfo, ITrackProvider>();
+        private static readonly Dictionary<MemberInfo, ITrackProvider> s_ProviderByMember = new Dictionary<MemberInfo, ITrackProvider>();
 
-        /// <summary>
-        /// Register a custom track provider. Newly registered providers take precedence over built-in providers.
-        /// </summary>
         public static void RegisterTrackProvider(ITrackProvider provider)
         {
             if (provider == null) return;
-            // Avoid duplicate provider registration by concrete type
             var pt = provider.GetType();
             if (s_Providers.Any(p => p.GetType() == pt)) return;
             s_Providers.Insert(0, provider);
-            // Invalidate cached TrackMember lists so newly-registered providers can take effect
-            try { TimelineContext.TrackMembersCache.Clear(); } catch { }
-            try { s_ProviderByMember.Clear(); } catch { }
+            TimelineContext.TrackMembersCache.Clear();
+            s_ProviderByMember.Clear();
         }
 
-        /// <summary>
-        /// Returns a snapshot of currently-registered providers (for diagnostics).
-        /// </summary>
         public static ITrackProvider[] GetRegisteredProviders()
         {
             return s_Providers.ToArray();
         }
 
-        /// <summary>
-        /// Ensure providers are registered now (invokes auto-registration path).
-        /// </summary>
         public static void EnsureProvidersRegistered()
         {
             if (s_Providers.Count == 0) AutoRegisterProviders();
         }
 
-        // Ensure providers are registered at editor load (static constructors in provider classes may not run).
         [InitializeOnLoadMethod]
         private static void AutoRegisterProviders()
         {
-            try
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            foreach (var asm in assemblies)
             {
-                var assemblies = AppDomain.CurrentDomain.GetAssemblies();
-                foreach (var asm in assemblies)
+                Type[] types;
+                try { types = asm.GetTypes(); } catch { continue; }
+                foreach (var t in types)
                 {
-                    Type[] types;
-                    try { types = asm.GetTypes(); } catch { continue; }
-                    foreach (var t in types)
-                    {
-                        if (t.IsAbstract || t.IsInterface) continue;
-                        if (!typeof(ITrackProvider).IsAssignableFrom(t)) continue;
-                        // Skip the nested interface type itself
-                        if (t == typeof(ITrackProvider)) continue;
-                        // Skip anonymous / compiler-generated types
-                        if (t.Name.StartsWith("<")) continue;
+                    if (t.IsAbstract || t.IsInterface || t == typeof(ITrackProvider) || t.Name.StartsWith("<")) continue;
+                    if (!typeof(ITrackProvider).IsAssignableFrom(t)) continue;
 
-                        try
-                        {
-                            var inst = Activator.CreateInstance(t) as ITrackProvider;
-                            if (inst != null) RegisterTrackProvider(inst);
-                        }
-                        catch { }
-                    }
+                    var inst = Activator.CreateInstance(t) as ITrackProvider;
+                    if (inst != null) RegisterTrackProvider(inst);
                 }
             }
-            catch { }
-
-            // Log provider count after a short delay so Domain Reload messages don't swallow it
-            try
-            {
-                UnityEditor.EditorApplication.delayCall += () => {
-                    try { UnityEngine.Debug.Log($"[TrackRenderer] Providers registered: {s_Providers.Count}"); } catch { }
-                };
-            }
-            catch { }
         }
 
-        // NOTE: The reflection-based BuildTrackMembersForType was removed so that attribute-driven
-        // track creation is implemented by per-type providers in the Providers/ folder. This
-        // keeps TrackRenderer free of reflection and allows each data type to own its Track logic.
-
-    internal static void DrawSingleTrack(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
+        internal static void DrawSingleTrack(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
         {
-            // If a provider supplied this member, delegate drawing to the provider if it implements Draw
-            if (tm.Member != null && s_ProviderByMember.TryGetValue(tm.Member, out var prov))
+            if (tm.Member != null && s_ProviderByMember.TryGetValue(tm.Member, out var prov) && prov is ICustomTrackDrawer drawer)
             {
-                try
-                {
-                    if (prov is ICustomTrackDrawer drawer)
-                    {
-                        drawer.Draw(target, tm, rect, st, totalFrames);
-                        return;
-                    }
-                }
-                catch { }
+                drawer.Draw(target, tm, rect, st, totalFrames);
+                return;
             }
 
-            // Minimal placeholder when no provider exists for this member: draw a subtle background
             EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.01f));
         }
     }

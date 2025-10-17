@@ -243,13 +243,8 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
 
     private static float ResolveClipFPS(AnimationClip clip)
     {
-#if UNITY_2021_2_OR_NEWER
-        // Use frameRate; fallback to 60 if not set
         var est = (clip.frameRate > 0f) ? clip.frameRate : 60f;
         return Mathf.Clamp(est, 10f, 120f);
-#else
-        return 60f;
-#endif
     }
 
 
