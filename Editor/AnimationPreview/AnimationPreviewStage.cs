@@ -85,7 +85,7 @@ public class AnimationPreviewStage : PreviewSceneStage
                     }
                     else
                     {
-                        // No animator found
+                        Debug.LogWarning("[Preview] The preview Prefab has no Animator; animation may not play.");
                     }
                 }
             }
@@ -118,19 +118,19 @@ public class AnimationPreviewStage : PreviewSceneStage
                         }
                         else
                         {
-                            // No animator found
+                            Debug.LogWarning("[Preview] The preview object has no Animator; animation may not play.");
                         }
                     }
                     else
                     {
-                        // No AnimationPreviewPlayer found
+                        Debug.LogWarning("[Preview] No AnimationPreviewPlayer found on Target. Preview may be limited.");
                     }
                 }
                 catch (Exception)
                 {
                     _movedOriginal = false;
                     _previewRoot = null;
-                    // Failed to move target
+                    Debug.LogWarning("[Preview] Failed to move target into preview stage. Please assign a valid Prefab with SkinnedMeshRenderer.");
                 }
             }
         }
@@ -393,7 +393,7 @@ public class AnimationPreviewStage : PreviewSceneStage
             {
                 if (!rendererEditable)
                 {
-                    // RendererData not editable
+                    Debug.LogWarning("[Preview] RendererData is not editable and outline feature is missing; cannot add feature. Will attempt to configure if it appears later.");
                     return;
                 }
                 featureInstance = ScriptableObject.CreateInstance(outlineFeatureType) as ScriptableObject;
@@ -492,14 +492,14 @@ public class AnimationPreviewStage : PreviewSceneStage
         var prefabType = PrefabUtility.GetPrefabAssetType(asset);
         if (prefabType != PrefabAssetType.Regular && prefabType != PrefabAssetType.Variant)
         {
-            // Not a valid prefab
+            Debug.LogWarning($"[Preview] Assigned modelPrefab '{asset.name}' is not a Prefab asset. Please assign a Prefab.");
             return false;
         }
 
         // Ensure it contains a SkinnedMeshRenderer
         if (!PrefabAssetHasSkinnedMesh(asset))
         {
-            // No SkinnedMeshRenderer
+            Debug.LogWarning($"[Preview] Prefab '{asset.name}' has no SkinnedMeshRenderer. Please assign a character Prefab with SMR.");
             return false;
         }
 
@@ -641,7 +641,12 @@ public class AnimationPreviewStage : PreviewSceneStage
             return false;
         }
 
-
+        // const HideFlags desiredHideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector;
+        // if (featureInstance.hideFlags != desiredHideFlags)
+        // {
+        //     featureInstance.hideFlags = desiredHideFlags;
+        //     dirty = true;
+        // }
 
         var featureType = featureInstance.GetType();
         var settingsProperty = featureType.GetProperty("FeatureSettings", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -932,4 +937,6 @@ public class AnimationPreviewStage : PreviewSceneStage
 }
 
 // Timeline receiver contracts moved to EditorPlus.AnimationPreview namespace (see SceneTimelineTypes.cs)
+
+// Reflection helpers removed – using typed UniversalAnimPlayer access.
 #endif

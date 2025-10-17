@@ -8,8 +8,11 @@ using Sirenix.Utilities.Editor;
 
 namespace EditorPlus.AnimationPreview
 {
+    // Provider for members that are arrays of frame-like POCOs (HitFrame[], ProjectileFrame[], ChildActorFrame[], etc.)
     internal class FrameArrayTrackProvider : TrackRenderer.ITrackProvider, TrackRenderer.ICustomTrackDrawer
     {
+        // Provider will be auto-registered via TrackRenderer.AutoRegisterProviders
+        // Provider-wide default color for frame-array members.
         private readonly Color DefaultColor = new Color(0.8f, 0.8f, 0.8f);
 
         public bool CanHandle(Type t)
@@ -19,11 +22,14 @@ namespace EditorPlus.AnimationPreview
             foreach (var m in t.GetMembers(flags))
             {
                 var attrs = m.GetCustomAttributes(false);
-                if (Array.Exists(attrs, a => a.GetType().Name == "AnimationEventAttribute"))
-                {
-                    Type vt = m is FieldInfo f ? f.FieldType : m is PropertyInfo p ? p.PropertyType : null;
-                    if (vt?.IsArray == true) return true;
-                }
+                object found = null;
+                foreach (var a in attrs) if (a != null && a.GetType().Name == "AnimationEventAttribute") { found = a; break; }
+                if (found == null) continue;
+                Type vt = null;
+                if (m is FieldInfo f) vt = f.FieldType;
+                else if (m is PropertyInfo p) vt = p.PropertyType;
+                if (vt == null) continue;
+                if (vt.IsArray) return true;
             }
             return false;
         }
@@ -59,9 +65,10 @@ namespace EditorPlus.AnimationPreview
             string previewName = null;
             ProviderUtils.ExtractAttributeData(animationEventAttributeInstance, ref label, ref colorHex, ref order, ref previewName);
 
+            // Use provider-level default color (frame-array provider default is a neutral gray).
             var color = AnimationPreviewDrawer.ParseHexOrDefault(colorHex, DefaultColor);
 
-            return new TrackMember
+            var trackMember = new TrackMember
             {
                 Member = member,
                 Label = label,
@@ -72,20 +79,102 @@ namespace EditorPlus.AnimationPreview
                 Setter = setter,
                 Order = order
             };
+
+            return trackMember;
         }
 
         public void Draw(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
         {
+            // Reuse AnimationPreviewDrawer helpers to read frames and draw markers for POCO arrays
             var arrObj = tm.Getter?.Invoke(target) as Array;
-            var frames = ExtractFrames(arrObj);
+            int[] frames = Array.Empty<int>();
+            object[] elements = null;
+            if (arrObj != null)
+            {
+                var list = new List<int>(arrObj.Length);
+                elements = new object[arrObj.Length];
+                for (int i = 0; i < arrObj.Length; i++)
+                {
+                    var elem = arrObj.GetValue(i);
+                    elements[i] = elem;
+                    if (elem == null) { list.Add(-1); continue; }
+                    int elemFrame = -1;
+                    try
+                    {
+                        if (elem is Quantum.HitFrame hf) elemFrame = hf.frame;
+                        else if (elem is Quantum.ProjectileFrame pf) elemFrame = pf.frame;
+                        else if (elem is Quantum.ChildActorFrame caf) elemFrame = caf.Frame;
+                        else elemFrame = -1;
+                    }
+                    catch { elemFrame = -1; }
+                    if (elemFrame >= 0) list.Add(elemFrame); else list.Add(-1);
+                }
 
-            if (frames.Length > 0)
+                var tmp = new List<int>(list.Count);
+                for (int i = 0; i < list.Count; i++) if (list[i] >= 0) tmp.Add(list[i]);
+                frames = tmp.ToArray();
+            }
+
+            if (frames != null && frames.Length > 0)
             {
                 AnimationPreviewDrawer.DrawMarkers(target, tm, rect, st, frames, tm.Color, TimelineContext.MarkerWidth, TimelineContext.ComputeControlSeed(target, tm), totalFrames, out int clickedIndex, out bool context, out int draggedIndex, out int draggedFrame);
 
                 if (draggedIndex >= 0 && draggedFrame >= 0 && arrObj != null && tm.Setter != null)
                 {
-                    ApplyDraggedFrame(arrObj, draggedIndex, draggedFrame, tm, target);
+                    int mapped = -1; int seen = 0;
+                    for (int i = 0; i < arrObj.Length; i++)
+                    {
+                        var elem = arrObj.GetValue(i);
+                        if (elem == null) continue;
+                        int ef = -1;
+                        try
+                        {
+                            if (elem is Quantum.HitFrame hf2) ef = hf2.frame;
+                            else if (elem is Quantum.ProjectileFrame pf2) ef = pf2.frame;
+                            else if (elem is Quantum.ChildActorFrame caf2) ef = caf2.Frame;
+                            else ef = -1;
+                        }
+                        catch { ef = -1; }
+                        if (ef >= 0)
+                        {
+                            if (seen == draggedIndex) { mapped = i; break; }
+                            seen++;
+                        }
+                    }
+
+                    if (mapped >= 0)
+                    {
+                        var elem = arrObj.GetValue(mapped);
+                        if (elem != null)
+                        {
+                            bool applied = false;
+                            try
+                            {
+                                if (elem is Quantum.HitFrame hh)
+                                {
+                                    hh.frame = draggedFrame;
+                                    try { arrObj.SetValue(hh, mapped); } catch { }
+                                    applied = true;
+                                }
+                                else if (elem is Quantum.ProjectileFrame pp)
+                                {
+                                    pp.frame = draggedFrame;
+                                    try { arrObj.SetValue(pp, mapped); } catch { }
+                                    applied = true;
+                                }
+                                else if (elem is Quantum.ChildActorFrame)
+                                {
+                                    applied = false;
+                                }
+                            }
+                            catch { applied = false; }
+
+                            if (applied)
+                            {
+                                try { tm.Setter(target, arrObj); EditorUtility.SetDirty(target); } catch { }
+                            }
+                        }
+                    }
                 }
 
                 if (context)
@@ -95,107 +184,13 @@ namespace EditorPlus.AnimationPreview
             }
             else
             {
-                var frames2 = ReadFrameArrayLocal(target, tm.Member);
-                if (frames2.Length > 0)
-                {
-                    AnimationPreviewDrawer.DrawMarkers(target, tm, rect, st, frames2, tm.Color, TimelineContext.MarkerWidth, TimelineContext.ComputeControlSeed(target, tm), totalFrames, out int _, out bool context2, out int _, out int _);
-                    if (context2) AnimationPreviewDrawer.ShowReadOnlyContextMenu();
-                }
-                else
-                {
-                    EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.02f));
-                    var c = GUI.color; GUI.color = new Color(1, 1, 1, 0.5f);
-                    GUI.Label(rect, "〈No Frame Data〉", SirenixGUIStyles.MiniLabelCentered);
-                    GUI.color = c;
-                }
+                EditorGUI.DrawRect(rect, new Color(0, 0, 0, 0.02f));
+                var c = GUI.color; GUI.color = new Color(1, 1, 1, 0.5f);
+                GUI.Label(rect, "〈No Frame Data〉", SirenixGUIStyles.MiniLabelCentered);
+                GUI.color = c;
             }
-        }
-
-        private static int[] ExtractFrames(Array arrObj)
-        {
-            if (arrObj == null) return Array.Empty<int>();
-            var list = new List<int>();
-            for (int i = 0; i < arrObj.Length; i++)
-            {
-                var element = arrObj.GetValue(i);
-                if (element == null) continue;
-                int frame = GetFrameFromElement(element);
-                if (frame >= 0) list.Add(frame);
-            }
-            return list.ToArray();
-        }
-
-        private static int GetFrameFromElement(object elem)
-        {
-            return elem switch
-            {
-                Quantum.HitFrame hf => hf.frame,
-                Quantum.ProjectileFrame pf => pf.frame,
-                Quantum.ChildActorFrame caf => caf.Frame,
-                _ => -1
-            };
-        }
-
-        private static void ApplyDraggedFrame(Array arrObj, int draggedIndex, int draggedFrame, TrackMember tm, UnityEngine.Object target)
-        {
-            int mapped = -1, seen = 0;
-            for (int i = 0; i < arrObj.Length; i++)
-            {
-                var element = arrObj.GetValue(i);
-                if (element == null) continue;
-                int ef = GetFrameFromElement(element);
-                if (ef >= 0)
-                {
-                    if (seen == draggedIndex) { mapped = i; break; }
-                    seen++;
-                }
-            }
-
-            if (mapped < 0) return;
-            var elem = arrObj.GetValue(mapped);
-            if (elem == null) return;
-
-            bool applied = false;
-            if (elem is Quantum.HitFrame hh)
-            {
-                hh.frame = draggedFrame;
-                arrObj.SetValue(hh, mapped);
-                applied = true;
-            }
-            else if (elem is Quantum.ProjectileFrame pp)
-            {
-                pp.frame = draggedFrame;
-                arrObj.SetValue(pp, mapped);
-                applied = true;
-            }
-
-            if (applied)
-            {
-                tm.Setter(target, arrObj);
-                EditorUtility.SetDirty(target);
-            }
-        }
-
-        private static int[] ReadFrameArrayLocal(UnityEngine.Object owner, MemberInfo member)
-        {
-            if (owner == null || member == null) return Array.Empty<int>();
-
-            Func<object> getter = member is FieldInfo fi ? () => fi.GetValue(owner) : member is PropertyInfo pi && pi.CanRead ? () => pi.GetValue(owner, null) : null;
-            var arrObj = getter?.Invoke() as Array;
-            if (arrObj == null) return Array.Empty<int>();
-
-            var list = new List<int>();
-            for (int i = 0; i < arrObj.Length; i++)
-            {
-                var elem = arrObj.GetValue(i);
-                if (elem == null) continue;
-                var et = elem.GetType();
-                var fiElem = et.GetField("frame", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
-                int ef = fiElem != null ? (int)fiElem.GetValue(elem) : -1;
-                if (ef >= 0) list.Add(ef);
-            }
-            return list.ToArray();
         }
     }
 }
+
 #endif

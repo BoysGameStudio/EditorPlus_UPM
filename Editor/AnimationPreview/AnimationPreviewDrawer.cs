@@ -70,63 +70,6 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
             state.VisibleRect = tracksRect;
 
             TrackRenderer.DrawTracks(parentTarget, tracksRect, state, fps, totalFrames);
-            // Emit diagnostics to the Console to help debug missing timeline/tracks
-            // Diagnostics removed: avoid spamming the Console in normal editor usage.
-            // Diagnostic: if no tracks were drawn, show a small hint so it's easier to
-            // spot why the timeline appears empty. This prints provider count and
-            // the current previewName scope.
-            try
-            {
-                var members = GetTrackMembers(parentTarget);
-                if (members == null || members.Length == 0)
-                {
-                    int provCount = 0;
-                    try { provCount = TrackRenderer.GetRegisteredProviders()?.Length ?? 0; } catch { }
-
-                    // Reflection fallback: scan the parentTarget type for any members
-                    // bearing an attribute named "AnimationEventAttribute" so we can
-                    // detect attribute presence and any PreviewName values.
-                    string foundAttrsSummary = string.Empty;
-                    try
-                    {
-                        var t = parentTarget.GetType();
-                        var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                        var membersList = t.GetMembers(flags);
-                        var found = new List<string>();
-                        for (int mi = 0; mi < membersList.Length; mi++)
-                        {
-                            var m = membersList[mi];
-                            var attrs = m.GetCustomAttributes(false);
-                            if (attrs == null) continue;
-                            for (int ai = 0; ai < attrs.Length; ai++)
-                            {
-                                var a = attrs[ai];
-                                if (a == null) continue;
-                                if (a.GetType().Name == "AnimationEventAttribute")
-                                {
-                                    string pm = "<none>";
-                                    try
-                                    {
-                                        var prop = a.GetType().GetProperty("PreviewName");
-                                        if (prop != null) pm = prop.GetValue(a) as string ?? "<none>";
-                                    }
-                                    catch { }
-                                    found.Add($"{m.Name}(previewName={pm})");
-                                }
-                            }
-                        }
-                        if (found.Count > 0) foundAttrsSummary = string.Join(", ", found);
-                    }
-                    catch { }
-
-                    var hint = $"No timeline tracks found (providers={provCount}, previewName={(string.IsNullOrEmpty(previewName)?"<none>":previewName)})" + (string.IsNullOrEmpty(foundAttrsSummary) ? "" : $" — attributes: {foundAttrsSummary}");
-                    var hintR = new Rect(tracksRect.x + 8, tracksRect.y + 8, tracksRect.width - 16, 20 + (string.IsNullOrEmpty(foundAttrsSummary) ? 0 : 14));
-                    GUIStyle s = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleLeft };
-                    EditorGUI.LabelField(hintR, hint, s);
-                    // Reflection diagnostic removed to avoid console spam.
-                }
-            }
-            catch { }
             InputHandler.HandleZoomAndClick(parentTarget, rect, rulerRect, tracksRect, state, totalFrames);
         }
         GUILayout.EndVertical();
@@ -243,6 +186,7 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
 
     private static float ResolveClipFPS(AnimationClip clip)
     {
+        // Use frameRate; fallback to 60 if not set
         var est = (clip.frameRate > 0f) ? clip.frameRate : 60f;
         return Mathf.Clamp(est, 10f, 120f);
     }
