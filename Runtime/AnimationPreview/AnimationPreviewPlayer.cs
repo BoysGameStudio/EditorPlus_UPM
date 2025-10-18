@@ -598,28 +598,21 @@ public class AnimationPreviewPlayer : MonoBehaviour
         var clone = Instantiate(original);
         clone.name = original.name + " (Preview)";
         clone.hideFlags = HideFlags.HideAndDontSave;
-        try
+        var events = AnimationUtility.GetAnimationEvents(clone);
+        if (events != null && events.Length > 0)
         {
-            var events = AnimationUtility.GetAnimationEvents(clone);
-            if (events != null && events.Length > 0)
+            // Keep only events with a valid function name to avoid Unity errors during sampling.
+            List<AnimationEvent> filtered = new List<AnimationEvent>(events.Length);
+            for (int i = 0; i < events.Length; i++)
             {
-                // Keep only events with a valid function name to avoid Unity errors during sampling.
-                List<AnimationEvent> filtered = new List<AnimationEvent>(events.Length);
-                for (int i = 0; i < events.Length; i++)
-                {
-                    var ev = events[i];
-                    if (!string.IsNullOrEmpty(ev.functionName))
-                        filtered.Add(ev);
-                }
-                if (filtered.Count != events.Length)
-                {
-                    AnimationUtility.SetAnimationEvents(clone, filtered.ToArray());
-                }
+                var ev = events[i];
+                if (!string.IsNullOrEmpty(ev.functionName))
+                    filtered.Add(ev);
             }
-        }
-        catch (Exception)
-        {
-            // Best-effort sanitization; if anything fails, still use the clone.
+            if (filtered.Count != events.Length)
+            {
+                AnimationUtility.SetAnimationEvents(clone, filtered.ToArray());
+            }
         }
         _sanitizedCache[original] = clone;
         return clone;

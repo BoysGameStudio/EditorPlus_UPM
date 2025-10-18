@@ -62,7 +62,7 @@ internal sealed class AnimationPreviewController : IPreviewStageController
             return;
         }
 
-        try { StageUtility.GoToMainStage(); } catch { }
+    StageUtility.GoToMainStage();
         Object.DestroyImmediate(_stage);
         _stage = null;
     }

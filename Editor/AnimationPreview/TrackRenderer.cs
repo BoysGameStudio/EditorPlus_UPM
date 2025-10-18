@@ -16,7 +16,7 @@ namespace EditorPlus.AnimationPreview
         {
             // Determine preview scope for this draw (if available)
             string previewName = null;
-            try { previewName = TimelineContext.GetPreviewNameForTarget(parentTarget); } catch { previewName = null; }
+            previewName = TimelineContext.GetPreviewNameForTarget(parentTarget);
 
             var members = GetTrackMembers(parentTarget, previewName);
             float rowH = TimelineContext.TrackRowHeight;
@@ -48,7 +48,7 @@ namespace EditorPlus.AnimationPreview
             // If no providers were registered yet (possible during domain reload ordering), ensure registration
             if (s_Providers.Count == 0)
             {
-                try { AutoRegisterProviders(); } catch { }
+                AutoRegisterProviders();
             }
 
             if (!TimelineContext.TrackMembersCache.TryGetValue(type, out var cached))
@@ -95,19 +95,15 @@ namespace EditorPlus.AnimationPreview
                 // For this attributed member, ask each provider to build a single TrackMember
                 foreach (var p in s_Providers)
                 {
-                    try
+                    if (!p.CanHandle(type)) continue;
+                    var tmOpt = p.Build(member, animAttr);
+                    if (tmOpt.HasValue)
                     {
-                        if (!p.CanHandle(type)) continue;
-                        var tmOpt = p.Build(member, animAttr);
-                        if (tmOpt.HasValue)
-                        {
-                            var tm = tmOpt.Value;
-                            result.Add(tm);
-                            try { s_ProviderByMember[member] = p; } catch { }
-                            break; // move to next member once one provider handled it
-                        }
+                        var tm = tmOpt.Value;
+                        result.Add(tm);
+                        s_ProviderByMember[member] = p;
+                        break; // move to next member once one provider handled it
                     }
-                    catch { }
                 }
             }
 
@@ -149,8 +145,8 @@ namespace EditorPlus.AnimationPreview
             if (s_Providers.Any(p => p.GetType() == pt)) return;
             s_Providers.Insert(0, provider);
             // Invalidate cached TrackMember lists so newly-registered providers can take effect
-            try { TimelineContext.TrackMembersCache.Clear(); } catch { }
-            try { s_ProviderByMember.Clear(); } catch { }
+            TimelineContext.TrackMembersCache.Clear();
+            s_ProviderByMember.Clear();
         }
 
         /// <summary>
@@ -173,32 +169,27 @@ namespace EditorPlus.AnimationPreview
         [InitializeOnLoadMethod]
         private static void AutoRegisterProviders()
         {
-            try
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            foreach (var asm in assemblies)
             {
-                var assemblies = AppDomain.CurrentDomain.GetAssemblies();
-                foreach (var asm in assemblies)
+                Type[] types = asm.GetTypes();
+                foreach (var t in types)
                 {
-                    Type[] types;
-                    try { types = asm.GetTypes(); } catch { continue; }
-                    foreach (var t in types)
-                    {
-                        if (t.IsAbstract || t.IsInterface) continue;
-                        if (!typeof(ITrackProvider).IsAssignableFrom(t)) continue;
-                        // Skip the nested interface type itself
-                        if (t == typeof(ITrackProvider)) continue;
-                        // Skip anonymous / compiler-generated types
-                        if (t.Name.StartsWith("<")) continue;
+                    if (t.IsAbstract || t.IsInterface) continue;
+                    if (!typeof(ITrackProvider).IsAssignableFrom(t)) continue;
+                    // Skip the nested interface type itself
+                    if (t == typeof(ITrackProvider)) continue;
+                    // Skip anonymous / compiler-generated types
+                    if (t.Name.StartsWith("<")) continue;
 
-                        try
-                        {
-                            var inst = Activator.CreateInstance(t) as ITrackProvider;
-                            if (inst != null) RegisterTrackProvider(inst);
-                        }
-                        catch { }
+                    // Try create instance; if it fails, skip the provider (do not swallow general exceptions silently)
+                    object instObj = Activator.CreateInstance(t);
+                    if (instObj is ITrackProvider inst)
+                    {
+                        RegisterTrackProvider(inst);
                     }
                 }
             }
-            catch { }
         }
 
         // NOTE: The reflection-based BuildTrackMembersForType was removed so that attribute-driven
@@ -210,15 +201,11 @@ namespace EditorPlus.AnimationPreview
             // If a provider supplied this member, delegate drawing to the provider if it implements Draw
             if (tm.Member != null && s_ProviderByMember.TryGetValue(tm.Member, out var prov))
             {
-                try
+                if (prov is ICustomTrackDrawer drawer)
                 {
-                    if (prov is ICustomTrackDrawer drawer)
-                    {
-                        drawer.Draw(target, tm, rect, st, totalFrames);
-                        return;
-                    }
+                    drawer.Draw(target, tm, rect, st, totalFrames);
+                    return;
                 }
-                catch { }
             }
 
             // Minimal placeholder when no provider exists for this member: draw a subtle background

@@ -66,11 +66,7 @@ namespace Quantum
                 }
 
                 // Draw previews for any members annotated with AnimationPreviewAttribute on this object.
-                try
-                {
-                    AnimationPreviewInspectorHelper.DrawPreviewsFor(a);
-                }
-                catch { }
+                AnimationPreviewInspectorHelper.DrawPreviewsFor(a);
 
                 SirenixEditorGUI.EndBox();
             }

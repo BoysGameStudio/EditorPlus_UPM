@@ -165,17 +165,13 @@ namespace Quantum
                 for (int i = 0; i < entries.Count; i++) tmp[i] = TrackPaletteEntry.From(entries[i]);
                 TrackPaletteChanged.Invoke(tmp);
             }
-            try
+            var snapshot = new List<EditorPlus.AnimationPreview.PaletteEntry>(entries.Count);
+            for (int i = 0; i < entries.Count; i++)
             {
-                var snapshot = new List<EditorPlus.AnimationPreview.PaletteEntry>(entries.Count);
-                for (int i = 0; i < entries.Count; i++)
-                {
-                    var e = entries[i];
-                    snapshot.Add(new EditorPlus.AnimationPreview.PaletteEntry { Label = e.Label, Index = e.Index, FillColor = e.FillColor, OutlineColor = e.OutlineColor, IsActive = e.IsActive });
-                }
-                EditorPlus.AnimationPreview.PaletteBus.Publish(snapshot);
+                var e = entries[i];
+                snapshot.Add(new EditorPlus.AnimationPreview.PaletteEntry { Label = e.Label, Index = e.Index, FillColor = e.FillColor, OutlineColor = e.OutlineColor, IsActive = e.IsActive });
             }
-            catch { }
+            EditorPlus.AnimationPreview.PaletteBus.Publish(snapshot);
         }
 
         private static void ClearSceneTimelinePalette()

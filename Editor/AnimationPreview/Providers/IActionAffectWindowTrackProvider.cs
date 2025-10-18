@@ -41,7 +41,7 @@ namespace EditorPlus.AnimationPreview
         {
             if (member == null) return null;
 
-            try { UnityEngine.Debug.Log($"[IActionAffectWindowTrackProvider] Found attributed member: {member.DeclaringType?.Name}.{member.Name} (memberType={member.MemberType})"); } catch { }
+            UnityEngine.Debug.Log($"[IActionAffectWindowTrackProvider] Found attributed member: {member.DeclaringType?.Name}.{member.Name} (memberType={member.MemberType})");
 
             Type valueType = null;
             Func<UnityEngine.Object, object> getter = null;

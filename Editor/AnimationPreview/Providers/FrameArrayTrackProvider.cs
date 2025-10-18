@@ -99,14 +99,10 @@ namespace EditorPlus.AnimationPreview
                     elements[i] = elem;
                     if (elem == null) { list.Add(-1); continue; }
                     int elemFrame = -1;
-                    try
-                    {
-                        if (elem is Quantum.HitFrame hf) elemFrame = hf.frame;
-                        else if (elem is Quantum.ProjectileFrame pf) elemFrame = pf.frame;
-                        else if (elem is Quantum.ChildActorFrame caf) elemFrame = caf.Frame;
-                        else elemFrame = -1;
-                    }
-                    catch { elemFrame = -1; }
+                    if (elem is Quantum.HitFrame hf) elemFrame = hf.frame;
+                    else if (elem is Quantum.ProjectileFrame pf) elemFrame = pf.frame;
+                    else if (elem is Quantum.ChildActorFrame caf) elemFrame = caf.Frame;
+                    else elemFrame = -1;
                     if (elemFrame >= 0) list.Add(elemFrame); else list.Add(-1);
                 }
 
@@ -127,14 +123,10 @@ namespace EditorPlus.AnimationPreview
                         var elem = arrObj.GetValue(i);
                         if (elem == null) continue;
                         int ef = -1;
-                        try
-                        {
-                            if (elem is Quantum.HitFrame hf2) ef = hf2.frame;
-                            else if (elem is Quantum.ProjectileFrame pf2) ef = pf2.frame;
-                            else if (elem is Quantum.ChildActorFrame caf2) ef = caf2.Frame;
-                            else ef = -1;
-                        }
-                        catch { ef = -1; }
+                        if (elem is Quantum.HitFrame hf2) ef = hf2.frame;
+                        else if (elem is Quantum.ProjectileFrame pf2) ef = pf2.frame;
+                        else if (elem is Quantum.ChildActorFrame caf2) ef = caf2.Frame;
+                        else ef = -1;
                         if (ef >= 0)
                         {
                             if (seen == draggedIndex) { mapped = i; break; }
@@ -148,30 +140,27 @@ namespace EditorPlus.AnimationPreview
                         if (elem != null)
                         {
                             bool applied = false;
-                            try
-                            {
                                 if (elem is Quantum.HitFrame hh)
                                 {
                                     hh.frame = draggedFrame;
-                                    try { arrObj.SetValue(hh, mapped); } catch { }
+                                    arrObj.SetValue(hh, mapped);
                                     applied = true;
                                 }
                                 else if (elem is Quantum.ProjectileFrame pp)
                                 {
                                     pp.frame = draggedFrame;
-                                    try { arrObj.SetValue(pp, mapped); } catch { }
+                                    arrObj.SetValue(pp, mapped);
                                     applied = true;
                                 }
-                                else if (elem is Quantum.ChildActorFrame)
-                                {
-                                    applied = false;
-                                }
+                            else if (elem is Quantum.ChildActorFrame)
+                            {
+                                applied = false;
                             }
-                            catch { applied = false; }
 
                             if (applied)
                             {
-                                try { tm.Setter(target, arrObj); EditorUtility.SetDirty(target); } catch { }
+                                tm.Setter(target, arrObj);
+                                EditorUtility.SetDirty(target);
                             }
                         }
                     }

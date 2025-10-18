@@ -83,43 +83,38 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         if (clip == null) return 0f;
         float end = Mathf.Max(0f, clip.length);
 #if UNITY_EDITOR
-        try
+        // Safely probe clip curves and events without swallowing unexpected exceptions.
+        // AnimationUtility APIs may throw on certain malformed clips; use null checks and local guards.
+        var floatBindings = AnimationUtility.GetCurveBindings(clip);
+        if (floatBindings != null)
         {
-            // Float curves
-            var floatBindings = AnimationUtility.GetCurveBindings(clip);
-            if (floatBindings != null)
+            for (int i = 0; i < floatBindings.Length; i++)
             {
-                for (int i = 0; i < floatBindings.Length; i++)
-                {
-                    var curve = AnimationUtility.GetEditorCurve(clip, floatBindings[i]);
-                    if (curve == null || curve.length == 0) continue;
-                    float t = curve.keys[curve.length - 1].time;
-                    if (t > end) end = t;
-                }
-            }
-
-            // Object reference curves
-            var objBindings = AnimationUtility.GetObjectReferenceCurveBindings(clip);
-            if (objBindings != null)
-            {
-                for (int i = 0; i < objBindings.Length; i++)
-                {
-                    var keyframes = AnimationUtility.GetObjectReferenceCurve(clip, objBindings[i]);
-                    if (keyframes == null || keyframes.Length == 0) continue;
-                    float t = keyframes[keyframes.Length - 1].time;
-                    if (t > end) end = t;
-                }
-            }
-
-            // Events
-            var events = clip.events;
-            if (events != null && events.Length > 0)
-            {
-                float lastEvent = events[events.Length - 1].time;
-                if (lastEvent > end) end = lastEvent;
+                var curve = AnimationUtility.GetEditorCurve(clip, floatBindings[i]);
+                if (curve == null || curve.length == 0) continue;
+                float t = curve.keys[curve.length - 1].time;
+                if (t > end) end = t;
             }
         }
-        catch { }
+
+        var objBindings = AnimationUtility.GetObjectReferenceCurveBindings(clip);
+        if (objBindings != null)
+        {
+            for (int i = 0; i < objBindings.Length; i++)
+            {
+                var keyframes = AnimationUtility.GetObjectReferenceCurve(clip, objBindings[i]);
+                if (keyframes == null || keyframes.Length == 0) continue;
+                float t = keyframes[keyframes.Length - 1].time;
+                if (t > end) end = t;
+            }
+        }
+
+        var events = clip.events;
+        if (events != null && events.Length > 0)
+        {
+            float lastEvent = events[events.Length - 1].time;
+            if (lastEvent > end) end = lastEvent;
+        }
 #endif
         return end;
     }
@@ -173,12 +168,8 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         // object (domain reloads, nested serialization, etc.). Use the current
         // selection as a best-effort fallback so the timeline still appears in
         // the Inspector when the inspected object is selected.
-        try
-        {
-            var sel = UnityEditor.Selection.activeObject;
-            if (sel != null && sel != clipValue) return sel;
-        }
-        catch { }
+    var sel = UnityEditor.Selection.activeObject;
+    if (sel != null && sel != clipValue) return sel;
 
         return null;
     }

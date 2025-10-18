@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEditor;
 using UnityEditor.SceneManagement;
-using UnityEditor.Experimental.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using EditorPlus.AnimationPreview;
@@ -93,8 +92,6 @@ public class AnimationPreviewStage : PreviewSceneStage
             {
                 // If prefab instantiation failed, fall back to moving the provided target into the stage
                 // so the preview scene contains the preview root and the player can be inspected.
-                try
-                {
                     _originalScene = Target.scene;
                     _originalParentTransform = Target.transform.parent;
                     _originalSiblingIndex = Target.transform.GetSiblingIndex();
@@ -125,13 +122,6 @@ public class AnimationPreviewStage : PreviewSceneStage
                     {
                         Debug.LogWarning("[Preview] No AnimationPreviewPlayer found on Target. Preview may be limited.");
                     }
-                }
-                catch (Exception)
-                {
-                    _movedOriginal = false;
-                    _previewRoot = null;
-                    Debug.LogWarning("[Preview] Failed to move target into preview stage. Please assign a valid Prefab with SkinnedMeshRenderer.");
-                }
             }
         }
 
@@ -235,16 +225,7 @@ public class AnimationPreviewStage : PreviewSceneStage
         Shader.SetGlobalVectorArray(SceneTimelineOutlineColorsId, OutlineUpload);
     }
 
-    private static Vector4[] BuildUploadBuffer()
-    {
-        var buffer = new Vector4[MaxOutlineSlots];
-        for (int i = 0; i < MaxOutlineSlots; i++)
-        {
-            buffer[i] = Vector4.zero;
-        }
-
-        return buffer;
-    }
+    private static Vector4[] BuildUploadBuffer() => new Vector4[MaxOutlineSlots];
 
     private void CacheColorReceivers()
     {
@@ -331,8 +312,6 @@ public class AnimationPreviewStage : PreviewSceneStage
 
     private static void EnsureSceneTimelineOutlineFeature(GameObject previewRoot)
     {
-        try
-        {
             RenderPipelineAsset pipelineAsset = GraphicsSettings.currentRenderPipeline;
             if (pipelineAsset == null)
             {
@@ -426,11 +405,6 @@ public class AnimationPreviewStage : PreviewSceneStage
                 }
                 AssetDatabase.SaveAssets();
             }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogWarning($"Failed to ensure outline feature: {ex.Message}");
-        }
     }
 
     private static bool AddFeatureToRendererDataSerialized(ScriptableObject rendererData, ScriptableObject feature)
@@ -440,8 +414,6 @@ public class AnimationPreviewStage : PreviewSceneStage
             return false;
         }
 
-        try
-        {
             var so = new SerializedObject(rendererData);
             var featuresProp = so.FindProperty("m_RendererFeatures");
             if (featuresProp == null || !featuresProp.isArray)
@@ -463,11 +435,6 @@ public class AnimationPreviewStage : PreviewSceneStage
 
             so.ApplyModifiedPropertiesWithoutUndo();
             return true;
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     private static bool TryInstantiatePlayerModelPrefab(GameObject source, Scene targetScene, out GameObject instance)
@@ -510,8 +477,7 @@ public class AnimationPreviewStage : PreviewSceneStage
     {
         instance = null;
         if (asset == null) return false;
-        var type = PrefabAssetType.NotAPrefab;
-        try { type = PrefabUtility.GetPrefabAssetType(asset); } catch { }
+        var type = PrefabUtility.GetPrefabAssetType(asset);
         if (type != PrefabAssetType.Regular && type != PrefabAssetType.Variant)
         {
             return false;
@@ -537,25 +503,12 @@ public class AnimationPreviewStage : PreviewSceneStage
         if (asset == null) return false;
         string path = AssetDatabase.GetAssetPath(asset);
         if (string.IsNullOrEmpty(path)) return false;
-        GameObject contents = null;
-        try
-        {
-            contents = PrefabUtility.LoadPrefabContents(path);
-            if (contents == null) return false;
-            var smrs = contents.GetComponentsInChildren<SkinnedMeshRenderer>(true);
-            return smrs != null && smrs.Length > 0;
-        }
-        catch
-        {
-            return false;
-        }
-        finally
-        {
-            if (contents != null)
-            {
-                PrefabUtility.UnloadPrefabContents(contents);
-            }
-        }
+        GameObject contents = PrefabUtility.LoadPrefabContents(path);
+        if (contents == null) return false;
+        var smrs = contents.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+        bool has = smrs != null && smrs.Length > 0;
+        PrefabUtility.UnloadPrefabContents(contents);
+        return has;
     }
 
     // Note: Prefab must contain at least one SkinnedMeshRenderer for preview; FBX origin not required.
@@ -617,17 +570,10 @@ public class AnimationPreviewStage : PreviewSceneStage
         for (int i = 0; i < assemblies.Length; i++)
         {
             var assembly = assemblies[i];
-            try
+            var candidate = assembly.GetType(outlineTypeName, false);
+            if (candidate != null)
             {
-                var candidate = assembly.GetType(outlineTypeName, false);
-                if (candidate != null)
-                {
-                    return candidate;
-                }
-            }
-            catch
-            {
-                // Ignore load issues for dynamic assemblies.
+                return candidate;
             }
         }
         return null;
@@ -636,233 +582,137 @@ public class AnimationPreviewStage : PreviewSceneStage
     private static bool ConfigureOutlineFeatureInstance(ScriptableObject featureInstance, GameObject previewRoot)
     {
         bool dirty = false;
-        if (featureInstance == null)
-        {
-            return false;
-        }
-
-        // const HideFlags desiredHideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector;
-        // if (featureInstance.hideFlags != desiredHideFlags)
-        // {
-        //     featureInstance.hideFlags = desiredHideFlags;
-        //     dirty = true;
-        // }
+        if (featureInstance == null) return false;
 
         var featureType = featureInstance.GetType();
         var settingsProperty = featureType.GetProperty("FeatureSettings", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         object settings = settingsProperty?.GetValue(featureInstance);
-        if (settings != null)
+        if (settings == null) return false;
+
+        var settingsType = settings.GetType();
+
+        FieldInfo FindField(string name) => settingsType.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+        // Helper to set field if different
+        bool SetIfDifferent(FieldInfo field, object value)
         {
-            var settingsType = settings.GetType();
-
-            FieldInfo FindField(string name)
+            if (field == null) return false;
+            var current = field.GetValue(settings);
+            if (!Equals(current, value))
             {
-                return settingsType.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                field.SetValue(settings, value);
+                return true;
             }
-            var shaderField = FindField("shader");
-            if (shaderField != null)
+            return false;
+        }
+
+        // Shader
+        var shaderField = FindField("shader");
+        if (shaderField != null && shaderField.GetValue(settings) is not Shader)
+        {
+            Shader locatedShader = null;
+            string[] candidates = { "Hidden/Quantum/SceneTimelineOutline", "Hidden/SceneTimelineOutline", "Hidden/BoysGameStudio/SceneTimelineOutline" };
+            foreach (var name in candidates)
             {
-                if (shaderField.GetValue(settings) is not Shader shader || shader == null)
+                locatedShader = Shader.Find(name);
+                if (locatedShader != null) break;
+            }
+            if (locatedShader != null) dirty |= SetIfDifferent(shaderField, locatedShader);
+        }
+
+        // Scene View
+        dirty |= SetIfDifferent(FindField("sceneView"), true);
+
+        // Game View
+        dirty |= SetIfDifferent(FindField("gameView"), false);
+
+        // Layers
+        var layerMaskField = FindField("layers");
+        if (layerMaskField != null)
+        {
+            int maskValue = -1;
+            if (previewRoot != null)
+            {
+                maskValue = 0;
+                var rends = previewRoot.GetComponentsInChildren<Renderer>(true);
+                if (rends != null)
                 {
-                    // Try a few likely shader names to keep this feature generic across projects
-                    string[] candidates = new[]
+                    foreach (var r in rends)
                     {
-                        "Hidden/Quantum/SceneTimelineOutline",
-                        "Hidden/SceneTimelineOutline",
-                        "Hidden/BoysGameStudio/SceneTimelineOutline",
-                    };
-                    Shader locatedShader = null;
-                    for (int i = 0; i < candidates.Length && locatedShader == null; i++)
-                    {
-                        var s = Shader.Find(candidates[i]);
-                        if (s != null) locatedShader = s;
-                    }
-                    if (locatedShader != null)
-                    {
-                        shaderField.SetValue(settings, locatedShader);
-                        dirty = true;
-                    }
-                }
-            }
-
-            var runSceneField = FindField("sceneView");
-            if (runSceneField != null && runSceneField.GetValue(settings) is bool runScene && !runScene)
-            {
-                runSceneField.SetValue(settings, true);
-                dirty = true;
-            }
-
-            var runGameField = FindField("gameView");
-            if (runGameField != null)
-            {
-                bool desired = false; // restore strict: SceneView only by default
-                if (runGameField.GetValue(settings) is bool current && current != desired)
-                {
-                    runGameField.SetValue(settings, desired);
-                    dirty = true;
-                }
-            }
-
-            var layerMaskField = FindField("layers");
-            if (layerMaskField != null)
-            {
-                // Include all layers used by the preview root and its child renderers; fallback to Everything
-                int maskValue = -1;
-                if (previewRoot != null)
-                {
-                    maskValue = 0;
-                    try
-                    {
-                        var rends = previewRoot.GetComponentsInChildren<Renderer>(true);
-                        if (rends != null && rends.Length > 0)
-                        {
-                            for (int i = 0; i < rends.Length; i++)
-                            {
-                                var r = rends[i];
-                                int l = r.gameObject.layer;
-                                maskValue |= (1 << l);
-                            }
-                        }
-                        int rootLayer = previewRoot.layer;
-                        maskValue |= (1 << rootLayer);
-                    }
-                    catch { }
-                    if (maskValue == 0)
-                    {
-                        maskValue = -1; // Everything
+                        if (r != null) maskValue |= (1 << r.gameObject.layer);
                     }
                 }
-                // Assign whichever field type is present
-                var fieldType = layerMaskField.FieldType;
-                if (fieldType == typeof(int))
-                {
-                    layerMaskField.SetValue(settings, maskValue);
-                }
-                else if (fieldType == typeof(UnityEngine.LayerMask))
-                {
-                    var unityMask = new UnityEngine.LayerMask { value = maskValue };
-                    layerMaskField.SetValue(settings, unityMask);
-                }
-                else
-                {
-                    // Best-effort fallback
-                    layerMaskField.SetValue(settings, maskValue);
-                }
-                dirty = true;
+                maskValue |= (1 << previewRoot.layer);
+                if (maskValue == 0) maskValue = -1;
             }
+            var fieldType = layerMaskField.FieldType;
+            object value = fieldType == typeof(int) ? maskValue : new UnityEngine.LayerMask { value = maskValue };
+            dirty |= SetIfDifferent(layerMaskField, value);
+        }
 
-            // Set Reversed Z Override to Auto (both outline variants are drawn anyway in feature)
-            var reversedZField = FindField("z");
-            if (reversedZField != null)
-            {
-                try
-                {
-                    var enumType = reversedZField.FieldType;
-                    // The enum values are: Auto=0, ForceReversed=1, ForceForward=2
-                    object desired = Enum.ToObject(enumType, 0);
-                    object current = reversedZField.GetValue(settings);
-                    if (!Equals(current, desired))
-                    {
-                        reversedZField.SetValue(settings, desired);
-                        dirty = true;
-                    }
-                }
-                catch { /* ignore reflection issues */ }
-            }
+        // Reversed Z
+        var reversedZField = FindField("z");
+        if (reversedZField != null && reversedZField.FieldType.IsEnum)
+        {
+            var desired = Enum.ToObject(reversedZField.FieldType, 0);
+            dirty |= SetIfDifferent(reversedZField, desired);
+        }
 
-            // Enforce Render Pass Event = AfterRenderingTransparents
-            var renderPassEventField = FindField("passEvent");
-            if (renderPassEventField != null)
+        // Render Pass Event
+        var renderPassEventField = FindField("passEvent");
+        if (renderPassEventField != null && renderPassEventField.FieldType.IsEnum)
+        {
+            var names = Enum.GetNames(renderPassEventField.FieldType);
+            string match = Array.Find(names, n => string.Equals(n, "AfterRenderingTransparents", StringComparison.OrdinalIgnoreCase));
+            if (match != null)
             {
-                try
-                {
-                    var enumType = renderPassEventField.FieldType;
-                    var desired = Enum.Parse(enumType, "AfterRenderingTransparents", true);
-                    var current = renderPassEventField.GetValue(settings);
-                    if (!Equals(current, desired))
-                    {
-                        renderPassEventField.SetValue(settings, desired);
-                        dirty = true;
-                    }
-                }
-                catch { /* ignore */ }
-            }
-
-            // Use Palette Alpha = OFF
-            var usePaletteAlphaField = FindField("useAlpha");
-            if (usePaletteAlphaField != null)
-            {
-                if (usePaletteAlphaField.GetValue(settings) is bool current && current != false)
-                {
-                    usePaletteAlphaField.SetValue(settings, false);
-                    dirty = true;
-                }
-            }
-
-            // Thickness Space = Screen (1.0), Min Screen Thickness >= 3, Outline Width small but non-zero (use 3 px)
-            var thicknessSpaceField = FindField("thicknessSpace");
-            if (thicknessSpaceField != null)
-            {
-                if (!(thicknessSpaceField.GetValue(settings) is float ts) || Math.Abs(ts - 1.0f) > 1e-6f)
-                {
-                    thicknessSpaceField.SetValue(settings, 1.0f);
-                    dirty = true;
-                }
-            }
-            var minScreenThicknessField = FindField("minScreenPx");
-            if (minScreenThicknessField != null)
-            {
-                float desiredMin = 6.0f;
-                if (!(minScreenThicknessField.GetValue(settings) is float ms) || ms < desiredMin)
-                {
-                    minScreenThicknessField.SetValue(settings, desiredMin);
-                    dirty = true;
-                }
-            }
-            var outlineWidthField = FindField("width");
-            if (outlineWidthField != null)
-            {
-                float desiredWidth = 6.0f; // pixels in screen thickness mode
-                if (!(outlineWidthField.GetValue(settings) is float ow) || Math.Abs(ow - desiredWidth) > 1e-6f)
-                {
-                    outlineWidthField.SetValue(settings, desiredWidth);
-                    dirty = true;
-                }
-            }
-
-            // Silhouette Threshold ≈ 0.4, Feather ≈ 0.1
-            var silhouetteThresholdField = FindField("silhouette");
-            if (silhouetteThresholdField != null)
-            {
-                float desiredTh = 0.5f; // slightly stricter to reduce inner artifacts
-                if (!(silhouetteThresholdField.GetValue(settings) is float th) || Math.Abs(th - desiredTh) > 1e-6f)
-                {
-                    silhouetteThresholdField.SetValue(settings, desiredTh);
-                    dirty = true;
-                }
-            }
-            var silhouetteFeatherField = FindField("feather");
-            if (silhouetteFeatherField != null)
-            {
-                float desiredFeather = 0.1f;
-                if (!(silhouetteFeatherField.GetValue(settings) is float sf) || Math.Abs(sf - desiredFeather) > 1e-6f)
-                {
-                    silhouetteFeatherField.SetValue(settings, desiredFeather);
-                    dirty = true;
-                }
-            }
-            // Disable debug overlay to use proper stencil-limited silhouette only
-            var debugOverlayField = FindField("debug");
-            if (debugOverlayField != null)
-            {
-                if (!(debugOverlayField.GetValue(settings) is bool dbg) || dbg != false)
-                {
-                    debugOverlayField.SetValue(settings, false);
-                    dirty = true;
-                }
+                var desired = Enum.Parse(renderPassEventField.FieldType, match, true);
+                dirty |= SetIfDifferent(renderPassEventField, desired);
             }
         }
 
+        // Use Palette Alpha
+        dirty |= SetIfDifferent(FindField("useAlpha"), false);
+
+        // Thickness Space
+        var thicknessSpaceField = FindField("thicknessSpace");
+        if (thicknessSpaceField != null && thicknessSpaceField.GetValue(settings) is float ts && Math.Abs(ts - 1.0f) > 1e-6f)
+        {
+            dirty |= SetIfDifferent(thicknessSpaceField, 1.0f);
+        }
+
+        // Min Screen Thickness
+        var minScreenThicknessField = FindField("minScreenPx");
+        if (minScreenThicknessField != null && minScreenThicknessField.GetValue(settings) is float ms && ms < 6.0f)
+        {
+            dirty |= SetIfDifferent(minScreenThicknessField, 6.0f);
+        }
+
+        // Outline Width
+        var outlineWidthField = FindField("width");
+        if (outlineWidthField != null && outlineWidthField.GetValue(settings) is float ow && Math.Abs(ow - 6.0f) > 1e-6f)
+        {
+            dirty |= SetIfDifferent(outlineWidthField, 6.0f);
+        }
+
+        // Silhouette Threshold
+        var silhouetteThresholdField = FindField("silhouette");
+        if (silhouetteThresholdField != null && silhouetteThresholdField.GetValue(settings) is float th && Math.Abs(th - 0.5f) > 1e-6f)
+        {
+            dirty |= SetIfDifferent(silhouetteThresholdField, 0.5f);
+        }
+
+        // Feather
+        var silhouetteFeatherField = FindField("feather");
+        if (silhouetteFeatherField != null && silhouetteFeatherField.GetValue(settings) is float sf && Math.Abs(sf - 0.1f) > 1e-6f)
+        {
+            dirty |= SetIfDifferent(silhouetteFeatherField, 0.1f);
+        }
+
+        // Debug
+        dirty |= SetIfDifferent(FindField("debug"), false);
+
+        // Activate and create
         var setActiveMethod = featureType.GetMethod("SetActive", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         setActiveMethod?.Invoke(featureInstance, new object[] { true });
 
@@ -908,17 +758,13 @@ public class AnimationPreviewStage : PreviewSceneStage
         {
             var r = rends[i];
             if (!r) continue;
-            try
-            {
-                var originals = r.sharedMaterials;
-                if (originals == null || originals.Length == 0) continue;
-                _originalMaterials[r] = originals;
-                // Assign depth-only to all slots
-                var reps = new Material[originals.Length];
-                for (int s = 0; s < reps.Length; s++) reps[s] = _depthOnlyMat;
-                r.sharedMaterials = reps;
-            }
-            catch { /* ignore renderer issues */ }
+            var originals = r.sharedMaterials;
+            if (originals == null || originals.Length == 0) continue;
+            _originalMaterials[r] = originals;
+            // Assign depth-only to all slots
+            var reps = new Material[originals.Length];
+            for (int s = 0; s < reps.Length; s++) reps[s] = _depthOnlyMat;
+            r.sharedMaterials = reps;
         }
     }
 
@@ -930,7 +776,7 @@ public class AnimationPreviewStage : PreviewSceneStage
             var r = kv.Key;
             var mats = kv.Value;
             if (!r) continue;
-            try { r.sharedMaterials = mats; } catch { }
+            r.sharedMaterials = mats;
         }
         _originalMaterials.Clear();
     }
