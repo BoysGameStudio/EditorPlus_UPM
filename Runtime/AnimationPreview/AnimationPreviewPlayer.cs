@@ -127,8 +127,6 @@ public class AnimationPreviewPlayer : MonoBehaviour
 
     // Original clip (as selected) and a sanitized preview clone used to suppress invalid AnimationEvents.
     private AnimationClip _currentClipOrig;
-    [HideInInspector][SerializeField] private bool _ignoreAnimationEvents = true; public bool ignoreAnimationEvents { get => _ignoreAnimationEvents; set => _ignoreAnimationEvents = value; }
-    private readonly Dictionary<AnimationClip, AnimationClip> _sanitizedCache = new Dictionary<AnimationClip, AnimationClip>();
 
     public event Action<AnimationClip> OnClipChanged;
     public event Action<bool> OnPlayStateChanged;
@@ -151,7 +149,6 @@ public class AnimationPreviewPlayer : MonoBehaviour
         EditorApplication.update -= EditorTick;
         DestroyGraph();
         DespawnModelIfTemp();
-        ClearSanitizedCache();
     }
 
     private void OnValidate()
@@ -322,7 +319,7 @@ public class AnimationPreviewPlayer : MonoBehaviour
         var c = GetClipAtIndex();
         bool changed = c != _currentClipOrig;
         _currentClipOrig = c;
-        _currentClip = SelectPlayableClip(c);
+        _currentClip = c;
         _lastClipLength = _currentClip ? _currentClip.length : -1f;
         if (resetOnClipChange && doCrossfade == false) normalizedTime = Mathf.Clamp01(normalizedTime);
         if (!_currentClip || !animator)
@@ -593,46 +590,10 @@ public class AnimationPreviewPlayer : MonoBehaviour
 
     private AnimationClip SelectPlayableClip(AnimationClip original)
     {
-        if (original == null) return null;
-        if (!ignoreAnimationEvents) return original;
-        // Return cached sanitized clone, or create one.
-        if (_sanitizedCache.TryGetValue(original, out var cached) && cached)
-            return cached;
-        var clone = Instantiate(original);
-        clone.name = original.name + " (Preview)";
-        clone.hideFlags = HideFlags.HideAndDontSave;
-        var events = AnimationUtility.GetAnimationEvents(clone);
-        if (events != null && events.Length > 0)
-        {
-            // Keep only events with a valid function name to avoid Unity errors during sampling.
-            List<AnimationEvent> filtered = new List<AnimationEvent>(events.Length);
-            for (int i = 0; i < events.Length; i++)
-            {
-                var ev = events[i];
-                if (!string.IsNullOrEmpty(ev.functionName))
-                    filtered.Add(ev);
-            }
-            if (filtered.Count != events.Length)
-            {
-                AnimationUtility.SetAnimationEvents(clone, filtered.ToArray());
-            }
-        }
-        _sanitizedCache[original] = clone;
-        return clone;
+        return original;
     }
 
-    private void ClearSanitizedCache()
-    {
-        if (_sanitizedCache.Count == 0) return;
-        foreach (var kv in _sanitizedCache)
-        {
-            if (kv.Value)
-            {
-                DestroyImmediate(kv.Value);
-            }
-        }
-        _sanitizedCache.Clear();
-    }
+
 
     private void TryAutoAssignModelFromClip(AnimationClip clip, bool forced)
     {
