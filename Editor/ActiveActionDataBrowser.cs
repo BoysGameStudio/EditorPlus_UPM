@@ -25,7 +25,6 @@ namespace Quantum.Editor
         protected override void OnEnable()
         {
             base.OnEnable();
-            // RefreshTypeCache();
         }
 
         protected override OdinMenuTree BuildMenuTree()
