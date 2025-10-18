@@ -8,12 +8,13 @@ namespace EditorPlus.AnimationPreview
     {
         public static IPreviewStageController Impl { get; set; }
 
-    public static bool Open(GameObject target, UnityEngine.Object asset)
-    {
-        if (Impl == null || target == null) return false;
-        Impl.Open(target, asset);
-        return true;
-    }        public static void Close()
+        public static bool Open(GameObject target, UnityEngine.Object asset)
+        {
+            if (Impl == null || target == null) return false;
+            Impl.Open(target, asset);
+            return true;
+        }
+        public static void Close()
         {
             Impl?.Close();
         }

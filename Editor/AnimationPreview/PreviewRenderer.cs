@@ -25,7 +25,7 @@ namespace EditorPlus.AnimationPreview
             public Quaternion WorldRotation;
             public GameObject ContextObject;
         }
-     
+
 
         public static void DrawShape3DConfigPreview(SerializedProperty shapeProp, GameObject context)
         {
@@ -71,69 +71,69 @@ namespace EditorPlus.AnimationPreview
             switch (shapeType)
             {
                 case 1: // Sphere
-                {
-                    var radiusProp = shapeProp.FindPropertyRelative("SphereRadius");
-                    float r = 0.5f;
-                    if (radiusProp != null) r = Mathf.Max(0.001f, GetFloatSafe(radiusProp, 0.5f));
-                    Handles.DrawWireDisc(worldPos, worldRot * Vector3.up, r);
-                    Handles.DrawWireDisc(worldPos, worldRot * Vector3.right, r);
-                    Handles.DrawWireDisc(worldPos, worldRot * Vector3.forward, r);
-                    Handles.Label(worldPos + Vector3.up * (r + 0.1f), "HitFrame(Sphere)");
-                    break;
-                }
+                    {
+                        var radiusProp = shapeProp.FindPropertyRelative("SphereRadius");
+                        float r = 0.5f;
+                        if (radiusProp != null) r = Mathf.Max(0.001f, GetFloatSafe(radiusProp, 0.5f));
+                        Handles.DrawWireDisc(worldPos, worldRot * Vector3.up, r);
+                        Handles.DrawWireDisc(worldPos, worldRot * Vector3.right, r);
+                        Handles.DrawWireDisc(worldPos, worldRot * Vector3.forward, r);
+                        Handles.Label(worldPos + Vector3.up * (r + 0.1f), "HitFrame(Sphere)");
+                        break;
+                    }
 
                 case 2: // Box
-                {
-                    var extentsProp = shapeProp.FindPropertyRelative("BoxExtents");
-                    Vector3 ext = Vector3.one * 0.5f;
-                    if (extentsProp != null && extentsProp.propertyType == SerializedPropertyType.Vector3) ext = extentsProp.vector3Value;
-                    var verts = new Vector3[8];
-                    var half = ext;
-                    verts[0] = worldPos + worldRot * new Vector3(-half.x, -half.y, -half.z);
-                    verts[1] = worldPos + worldRot * new Vector3(half.x, -half.y, -half.z);
-                    verts[2] = worldPos + worldRot * new Vector3(half.x, -half.y, half.z);
-                    verts[3] = worldPos + worldRot * new Vector3(-half.x, -half.y, half.z);
-                    verts[4] = worldPos + worldRot * new Vector3(-half.x, half.y, -half.z);
-                    verts[5] = worldPos + worldRot * new Vector3(half.x, half.y, -half.z);
-                    verts[6] = worldPos + worldRot * new Vector3(half.x, half.y, half.z);
-                    verts[7] = worldPos + worldRot * new Vector3(-half.x, half.y, half.z);
+                    {
+                        var extentsProp = shapeProp.FindPropertyRelative("BoxExtents");
+                        Vector3 ext = Vector3.one * 0.5f;
+                        if (extentsProp != null && extentsProp.propertyType == SerializedPropertyType.Vector3) ext = extentsProp.vector3Value;
+                        var verts = new Vector3[8];
+                        var half = ext;
+                        verts[0] = worldPos + worldRot * new Vector3(-half.x, -half.y, -half.z);
+                        verts[1] = worldPos + worldRot * new Vector3(half.x, -half.y, -half.z);
+                        verts[2] = worldPos + worldRot * new Vector3(half.x, -half.y, half.z);
+                        verts[3] = worldPos + worldRot * new Vector3(-half.x, -half.y, half.z);
+                        verts[4] = worldPos + worldRot * new Vector3(-half.x, half.y, -half.z);
+                        verts[5] = worldPos + worldRot * new Vector3(half.x, half.y, -half.z);
+                        verts[6] = worldPos + worldRot * new Vector3(half.x, half.y, half.z);
+                        verts[7] = worldPos + worldRot * new Vector3(-half.x, half.y, half.z);
 
-                    Handles.DrawLine(verts[0], verts[1]); Handles.DrawLine(verts[1], verts[2]); Handles.DrawLine(verts[2], verts[3]); Handles.DrawLine(verts[3], verts[0]);
-                    Handles.DrawLine(verts[4], verts[5]); Handles.DrawLine(verts[5], verts[6]); Handles.DrawLine(verts[6], verts[7]); Handles.DrawLine(verts[7], verts[4]);
-                    Handles.DrawLine(verts[0], verts[4]); Handles.DrawLine(verts[1], verts[5]); Handles.DrawLine(verts[2], verts[6]); Handles.DrawLine(verts[3], verts[7]);
-                    Handles.Label(worldPos + worldRot * Vector3.up * (half.y + 0.1f), "HitFrame(Box)");
-                    break;
-                }
+                        Handles.DrawLine(verts[0], verts[1]); Handles.DrawLine(verts[1], verts[2]); Handles.DrawLine(verts[2], verts[3]); Handles.DrawLine(verts[3], verts[0]);
+                        Handles.DrawLine(verts[4], verts[5]); Handles.DrawLine(verts[5], verts[6]); Handles.DrawLine(verts[6], verts[7]); Handles.DrawLine(verts[7], verts[4]);
+                        Handles.DrawLine(verts[0], verts[4]); Handles.DrawLine(verts[1], verts[5]); Handles.DrawLine(verts[2], verts[6]); Handles.DrawLine(verts[3], verts[7]);
+                        Handles.Label(worldPos + worldRot * Vector3.up * (half.y + 0.1f), "HitFrame(Box)");
+                        break;
+                    }
 
                 case 3: // Capsule
-                {
-                    var radiusProp = shapeProp.FindPropertyRelative("CapsuleRadius");
-                    var heightProp = shapeProp.FindPropertyRelative("CapsuleHeight");
-                    float radius = 0.25f; float height = 1f;
-                    if (radiusProp != null) radius = Mathf.Max(0.001f, GetFloatSafe(radiusProp, 0.25f));
-                    if (heightProp != null) height = Mathf.Max(0f, GetFloatSafe(heightProp, 1f));
-                    float half = Mathf.Max(0f, (height - 2f * radius) * 0.5f);
-                    Vector3 up = worldRot * Vector3.up;
-                    var top = worldPos + up * half;
-                    var bot = worldPos - up * half;
-                    Handles.DrawWireDisc(top, worldRot * Vector3.up, radius);
-                    Handles.DrawWireDisc(bot, worldRot * Vector3.up, radius);
-                    // draw simple connecting lines (approx cylinder)
-                    Handles.DrawLine(top + worldRot * Vector3.right * radius, bot + worldRot * Vector3.right * radius);
-                    Handles.DrawLine(top - worldRot * Vector3.right * radius, bot - worldRot * Vector3.right * radius);
-                    Handles.DrawLine(top + worldRot * Vector3.forward * radius, bot + worldRot * Vector3.forward * radius);
-                    Handles.DrawLine(top - worldRot * Vector3.forward * radius, bot - worldRot * Vector3.forward * radius);
-                    Handles.Label(worldPos + up * (half + radius + 0.05f), "HitFrame(Capsule)");
-                    break;
-                }
+                    {
+                        var radiusProp = shapeProp.FindPropertyRelative("CapsuleRadius");
+                        var heightProp = shapeProp.FindPropertyRelative("CapsuleHeight");
+                        float radius = 0.25f; float height = 1f;
+                        if (radiusProp != null) radius = Mathf.Max(0.001f, GetFloatSafe(radiusProp, 0.25f));
+                        if (heightProp != null) height = Mathf.Max(0f, GetFloatSafe(heightProp, 1f));
+                        float half = Mathf.Max(0f, (height - 2f * radius) * 0.5f);
+                        Vector3 up = worldRot * Vector3.up;
+                        var top = worldPos + up * half;
+                        var bot = worldPos - up * half;
+                        Handles.DrawWireDisc(top, worldRot * Vector3.up, radius);
+                        Handles.DrawWireDisc(bot, worldRot * Vector3.up, radius);
+                        // draw simple connecting lines (approx cylinder)
+                        Handles.DrawLine(top + worldRot * Vector3.right * radius, bot + worldRot * Vector3.right * radius);
+                        Handles.DrawLine(top - worldRot * Vector3.right * radius, bot - worldRot * Vector3.right * radius);
+                        Handles.DrawLine(top + worldRot * Vector3.forward * radius, bot + worldRot * Vector3.forward * radius);
+                        Handles.DrawLine(top - worldRot * Vector3.forward * radius, bot - worldRot * Vector3.forward * radius);
+                        Handles.Label(worldPos + up * (half + radius + 0.05f), "HitFrame(Capsule)");
+                        break;
+                    }
 
-                    default:
+                default:
                     {
                         Handles.DrawWireDisc(worldPos, Vector3.up, 0.5f);
                         Handles.Label(worldPos + Vector3.up * 0.6f, "HitFrame");
                         break;
                     }
-                }
+            }
         }
 
         // Direct drawer for Quantum.Shape3DConfig (no reflection)
@@ -164,12 +164,12 @@ namespace EditorPlus.AnimationPreview
                 var entry = new Quantum.QuantumGizmoEntry(shapeColor);
                 Quantum.QuantumUnityRuntime.DrawShape3DConfigGizmo(config, worldPos, worldRot, entry);
 #else
-                // Fallback: draw shape based on type when Quantum gizmos unavailable
-                Handles.color = shapeColor;
-                
-                switch ((int)config.ShapeType)
-                {
-                    case 1: // Sphere
+            // Fallback: draw shape based on type when Quantum gizmos unavailable
+            Handles.color = shapeColor;
+
+            switch ((int)config.ShapeType)
+            {
+                case 1: // Sphere
                     {
                         float radius = (float)config.SphereRadius;
                         if (radius <= 0) radius = 0.5f;
@@ -180,7 +180,7 @@ namespace EditorPlus.AnimationPreview
                         break;
                     }
 
-                    case 2: // Box
+                case 2: // Box
                     {
                         var extents = config.BoxExtents.ToUnityVector3();
                         if (extents == Vector3.zero) extents = Vector3.one * 0.5f;
@@ -202,7 +202,7 @@ namespace EditorPlus.AnimationPreview
                         break;
                     }
 
-                    case 3: // Capsule
+                case 3: // Capsule
                     {
                         float radius = (float)config.CapsuleRadius;
                         float height = (float)config.CapsuleHeight;
@@ -223,15 +223,15 @@ namespace EditorPlus.AnimationPreview
                         break;
                     }
 
-                    default:
+                default:
                     {
                         Handles.DrawWireDisc(worldPos, Vector3.up, 0.5f);
                         Handles.Label(worldPos + Vector3.up * 0.6f, "HitFrame");
                         break;
                     }
-                }
-#endif
             }
+#endif
+        }
 
         public static void DrawHitFramesPreview(UnityEngine.Object parentTarget, int currentFrame)
         {
@@ -486,22 +486,22 @@ namespace EditorPlus.AnimationPreview
                     if (int.TryParse(prop.stringValue, out var r)) return r;
                     return fallback;
                 case SerializedPropertyType.Generic:
-                {
-                    var raw = prop.FindPropertyRelative("RawValue") ?? prop.FindPropertyRelative("Value") ?? prop.FindPropertyRelative("m_RawValue") ?? prop.FindPropertyRelative("m_Value");
-                    if (raw != null)
                     {
-                        switch (raw.propertyType)
+                        var raw = prop.FindPropertyRelative("RawValue") ?? prop.FindPropertyRelative("Value") ?? prop.FindPropertyRelative("m_RawValue") ?? prop.FindPropertyRelative("m_Value");
+                        if (raw != null)
                         {
-                            case SerializedPropertyType.Integer: return raw.intValue;
-                            case SerializedPropertyType.Float: return Mathf.RoundToInt(raw.floatValue);
-                            case SerializedPropertyType.Enum: return raw.enumValueIndex;
-                            case SerializedPropertyType.String:
-                                if (int.TryParse(raw.stringValue, out var rr)) return rr;
-                                break;
+                            switch (raw.propertyType)
+                            {
+                                case SerializedPropertyType.Integer: return raw.intValue;
+                                case SerializedPropertyType.Float: return Mathf.RoundToInt(raw.floatValue);
+                                case SerializedPropertyType.Enum: return raw.enumValueIndex;
+                                case SerializedPropertyType.String:
+                                    if (int.TryParse(raw.stringValue, out var rr)) return rr;
+                                    break;
+                            }
                         }
+                        return fallback;
                     }
-                    return fallback;
-                }
                 default:
                     return fallback;
             }
@@ -552,24 +552,24 @@ namespace EditorPlus.AnimationPreview
             return GameObject.Find("__DashTempPreview__");
         }
 
-    private static UnityEngine.Object _currentParentTarget;
-    private static int _currentFrame;
-    private static GameObject _currentContext;
+        private static UnityEngine.Object _currentParentTarget;
+        private static int _currentFrame;
+        private static GameObject _currentContext;
 
-    static PreviewRenderer()
-    {
-        SceneView.duringSceneGui += sv =>
+        static PreviewRenderer()
         {
-            if (_currentParentTarget != null && _currentContext != null)
+            SceneView.duringSceneGui += sv =>
             {
-                // Handle shape interaction first (before drawing)
-                HandleShapeInteraction();
+                if (_currentParentTarget != null && _currentContext != null)
+                {
+                    // Handle shape interaction first (before drawing)
+                    HandleShapeInteraction();
 
-                // Then draw the preview
-                DrawHitFramesPreviewInternal(_currentParentTarget, _currentFrame, _currentContext);
-            }
-        };
-    }
+                    // Then draw the preview
+                    DrawHitFramesPreviewInternal(_currentParentTarget, _currentFrame, _currentContext);
+                }
+            };
+        }
 
     }
 }

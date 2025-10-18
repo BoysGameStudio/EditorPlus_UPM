@@ -38,7 +38,7 @@ namespace EditorPlus.AnimationPreview
                 DrawSingleTrack(parentTarget, tm, content, st, totalFrames);
             }
 
-            
+
         }
 
         public static TrackMember[] GetTrackMembers(UnityEngine.Object target, string previewName = null)
@@ -121,18 +121,18 @@ namespace EditorPlus.AnimationPreview
             TrackMember? Build(System.Reflection.MemberInfo member, object animationEventAttributeInstance);
         }
 
-            // Optional interface providers can implement to handle custom drawing for their TrackMembers
-            public interface ICustomTrackDrawer
-            {
-                // Draw the given TrackMember into rect for the target object
-                void Draw(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames);
-            }
+        // Optional interface providers can implement to handle custom drawing for their TrackMembers
+        public interface ICustomTrackDrawer
+        {
+            // Draw the given TrackMember into rect for the target object
+            void Draw(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames);
+        }
 
         // Provider registry for open-closed extensibility. Providers should register themselves
         // via TrackRenderer.RegisterTrackProvider (e.g. Providers/*.cs files).
         private static readonly List<ITrackProvider> s_Providers = new List<ITrackProvider>();
-    // Mapping from MemberInfo to the provider that created its TrackMember (populated during Build)
-    private static readonly Dictionary<MemberInfo, ITrackProvider> s_ProviderByMember = new Dictionary<MemberInfo, ITrackProvider>();
+        // Mapping from MemberInfo to the provider that created its TrackMember (populated during Build)
+        private static readonly Dictionary<MemberInfo, ITrackProvider> s_ProviderByMember = new Dictionary<MemberInfo, ITrackProvider>();
 
         /// <summary>
         /// Register a custom track provider. Newly registered providers take precedence over built-in providers.
@@ -196,7 +196,7 @@ namespace EditorPlus.AnimationPreview
         // track creation is implemented by per-type providers in the Providers/ folder. This
         // keeps TrackRenderer free of reflection and allows each data type to own its Track logic.
 
-    internal static void DrawSingleTrack(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
+        internal static void DrawSingleTrack(UnityEngine.Object target, TrackMember tm, Rect rect, TimelineState st, int totalFrames)
         {
             // If a provider supplied this member, delegate drawing to the provider if it implements Draw
             if (tm.Member != null && s_ProviderByMember.TryGetValue(tm.Member, out var prov))

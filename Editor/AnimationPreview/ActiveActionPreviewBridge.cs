@@ -227,13 +227,13 @@ namespace EditorPlus.AnimationPreview
             var player = st.Player;
             var root = st.Root;
             if (root == null) return;
-                float fps = Mathf.Max(1f, player.previewFPS);
-                int frame = player.CurrentFrameAt(fps);
-                float time = frame / fps;
-                // Use AnimationMode to sample the clip onto the root GameObject in editor
-                UnityEditor.AnimationMode.StartAnimationMode();
-                UnityEditor.AnimationMode.SampleAnimationClip(root, clip, time);
-                UnityEditor.SceneView.RepaintAll();
+            float fps = Mathf.Max(1f, player.previewFPS);
+            int frame = player.CurrentFrameAt(fps);
+            float time = frame / fps;
+            // Use AnimationMode to sample the clip onto the root GameObject in editor
+            UnityEditor.AnimationMode.StartAnimationMode();
+            UnityEditor.AnimationMode.SampleAnimationClip(root, clip, time);
+            UnityEditor.SceneView.RepaintAll();
         }
 
         public static void TeardownPreview(ActiveActionData host)
@@ -251,7 +251,7 @@ namespace EditorPlus.AnimationPreview
                 }
             }
             _states.Remove(host);
-                AnimationPreviewStageBridge.Close();
+            AnimationPreviewStageBridge.Close();
         }
 
         public static bool HasAnyActivePreview()

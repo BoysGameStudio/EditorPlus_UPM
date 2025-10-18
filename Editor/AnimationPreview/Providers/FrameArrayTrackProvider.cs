@@ -140,18 +140,18 @@ namespace EditorPlus.AnimationPreview
                         if (elem != null)
                         {
                             bool applied = false;
-                                if (elem is Quantum.HitFrame hh)
-                                {
-                                    hh.frame = draggedFrame;
-                                    arrObj.SetValue(hh, mapped);
-                                    applied = true;
-                                }
-                                else if (elem is Quantum.ProjectileFrame pp)
-                                {
-                                    pp.frame = draggedFrame;
-                                    arrObj.SetValue(pp, mapped);
-                                    applied = true;
-                                }
+                            if (elem is Quantum.HitFrame hh)
+                            {
+                                hh.frame = draggedFrame;
+                                arrObj.SetValue(hh, mapped);
+                                applied = true;
+                            }
+                            else if (elem is Quantum.ProjectileFrame pp)
+                            {
+                                pp.frame = draggedFrame;
+                                arrObj.SetValue(pp, mapped);
+                                applied = true;
+                            }
                             else if (elem is Quantum.ChildActorFrame)
                             {
                                 applied = false;

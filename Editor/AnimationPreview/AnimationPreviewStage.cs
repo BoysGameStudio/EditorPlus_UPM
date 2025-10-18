@@ -92,36 +92,36 @@ public class AnimationPreviewStage : PreviewSceneStage
             {
                 // If prefab instantiation failed, fall back to moving the provided target into the stage
                 // so the preview scene contains the preview root and the player can be inspected.
-                    _originalScene = Target.scene;
-                    _originalParentTransform = Target.transform.parent;
-                    _originalSiblingIndex = Target.transform.GetSiblingIndex();
-                    SceneManager.MoveGameObjectToScene(Target, scene);
-                    _movedOriginal = true;
-                    _previewRoot = Target;
-                    Selection.activeObject = Target;
+                _originalScene = Target.scene;
+                _originalParentTransform = Target.transform.parent;
+                _originalSiblingIndex = Target.transform.GetSiblingIndex();
+                SceneManager.MoveGameObjectToScene(Target, scene);
+                _movedOriginal = true;
+                _previewRoot = Target;
+                Selection.activeObject = Target;
 
-                    // Ensure binder and depth-only materials are applied to the moved original
-                    EnsurePreviewBinder(_previewRoot);
-                    ApplyDepthOnlyToPreviewRenderers(_previewRoot);
+                // Ensure binder and depth-only materials are applied to the moved original
+                EnsurePreviewBinder(_previewRoot);
+                ApplyDepthOnlyToPreviewRenderers(_previewRoot);
 
-                    // Re-route player's animator to any animator on the moved original
-                    _playerInstance = Target ? Target.GetComponent<AnimationPreviewPlayer>() : null;
-                    if (_playerInstance != null)
+                // Re-route player's animator to any animator on the moved original
+                _playerInstance = Target ? Target.GetComponent<AnimationPreviewPlayer>() : null;
+                if (_playerInstance != null)
+                {
+                    var instAnimator = _previewRoot.GetComponentInChildren<Animator>(true);
+                    if (instAnimator != null)
                     {
-                        var instAnimator = _previewRoot.GetComponentInChildren<Animator>(true);
-                        if (instAnimator != null)
-                        {
-                            _playerInstance.animator = instAnimator;
-                        }
-                        else
-                        {
-                            Debug.LogWarning("[Preview] The preview object has no Animator; animation may not play.");
-                        }
+                        _playerInstance.animator = instAnimator;
                     }
                     else
                     {
-                        Debug.LogWarning("[Preview] No AnimationPreviewPlayer found on Target. Preview may be limited.");
+                        Debug.LogWarning("[Preview] The preview object has no Animator; animation may not play.");
                     }
+                }
+                else
+                {
+                    Debug.LogWarning("[Preview] No AnimationPreviewPlayer found on Target. Preview may be limited.");
+                }
             }
         }
 
@@ -312,99 +312,99 @@ public class AnimationPreviewStage : PreviewSceneStage
 
     private static void EnsureSceneTimelineOutlineFeature(GameObject previewRoot)
     {
-            RenderPipelineAsset pipelineAsset = GraphicsSettings.currentRenderPipeline;
-            if (pipelineAsset == null)
+        RenderPipelineAsset pipelineAsset = GraphicsSettings.currentRenderPipeline;
+        if (pipelineAsset == null)
+        {
+            pipelineAsset = GraphicsSettings.defaultRenderPipeline;
+        }
+        if (pipelineAsset == null)
+        {
+            pipelineAsset = QualitySettings.renderPipeline;
+        }
+        if (pipelineAsset == null)
+        {
+            return;
+        }
+
+        var pipelineTypeName = pipelineAsset.GetType().FullName;
+        if (string.IsNullOrEmpty(pipelineTypeName) || pipelineTypeName.IndexOf("Universal", StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            return;
+        }
+
+        var rendererData = GetPrimaryRendererData(pipelineAsset);
+        if (rendererData == null)
+        {
+            return;
+        }
+
+        bool rendererEditable = AssetDatabase.IsOpenForEdit(rendererData);
+
+        var outlineFeatureType = FindOutlineFeatureType();
+        if (outlineFeatureType == null)
+        {
+            return;
+        }
+
+        var featuresField = rendererData.GetType().GetField("m_RendererFeatures", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (featuresField == null)
+        {
+            return;
+        }
+
+        if (featuresField.GetValue(rendererData) is not IList featuresList)
+        {
+            return;
+        }
+
+        ScriptableObject featureInstance = null;
+        for (int i = 0; i < featuresList.Count; i++)
+        {
+            if (featuresList[i] is ScriptableObject candidate && candidate != null && outlineFeatureType.IsInstanceOfType(candidate))
             {
-                pipelineAsset = GraphicsSettings.defaultRenderPipeline;
+                featureInstance = candidate;
+                break;
             }
-            if (pipelineAsset == null)
+        }
+
+        bool featureAdded = false;
+        if (featureInstance == null)
+        {
+            if (!rendererEditable)
             {
-                pipelineAsset = QualitySettings.renderPipeline;
-            }
-            if (pipelineAsset == null)
-            {
+                Debug.LogWarning("[Preview] RendererData is not editable and outline feature is missing; cannot add feature. Will attempt to configure if it appears later.");
                 return;
             }
-
-            var pipelineTypeName = pipelineAsset.GetType().FullName;
-            if (string.IsNullOrEmpty(pipelineTypeName) || pipelineTypeName.IndexOf("Universal", StringComparison.OrdinalIgnoreCase) < 0)
-            {
-                return;
-            }
-
-            var rendererData = GetPrimaryRendererData(pipelineAsset);
-            if (rendererData == null)
-            {
-                return;
-            }
-
-            bool rendererEditable = AssetDatabase.IsOpenForEdit(rendererData);
-
-            var outlineFeatureType = FindOutlineFeatureType();
-            if (outlineFeatureType == null)
-            {
-                return;
-            }
-
-            var featuresField = rendererData.GetType().GetField("m_RendererFeatures", BindingFlags.Instance | BindingFlags.NonPublic);
-            if (featuresField == null)
-            {
-                return;
-            }
-
-            if (featuresField.GetValue(rendererData) is not IList featuresList)
-            {
-                return;
-            }
-
-            ScriptableObject featureInstance = null;
-            for (int i = 0; i < featuresList.Count; i++)
-            {
-                if (featuresList[i] is ScriptableObject candidate && candidate != null && outlineFeatureType.IsInstanceOfType(candidate))
-                {
-                    featureInstance = candidate;
-                    break;
-                }
-            }
-
-            bool featureAdded = false;
+            featureInstance = ScriptableObject.CreateInstance(outlineFeatureType) as ScriptableObject;
             if (featureInstance == null)
             {
-                if (!rendererEditable)
-                {
-                    Debug.LogWarning("[Preview] RendererData is not editable and outline feature is missing; cannot add feature. Will attempt to configure if it appears later.");
-                    return;
-                }
-                featureInstance = ScriptableObject.CreateInstance(outlineFeatureType) as ScriptableObject;
-                if (featureInstance == null)
-                {
-                    return;
-                }
-                featureInstance.name = "OutlineFeature";
-                // featureInstance.hideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector;
-                AssetDatabase.AddObjectToAsset(featureInstance, rendererData);
-                // Use SerializedObject to append to m_RendererFeatures to avoid YAML block assertion issues
-                if (!AddFeatureToRendererDataSerialized(rendererData, featureInstance))
-                {
-                    // Fallback to list add if serialized path failed
-                    featuresList.Add(featureInstance);
-                }
-                featureAdded = true;
-
+                return;
             }
-
-            bool settingsDirty = ConfigureOutlineFeatureInstance(featureInstance, previewRoot);
-            if (rendererEditable && (featureAdded || settingsDirty))
+            featureInstance.name = "OutlineFeature";
+            // featureInstance.hideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector;
+            AssetDatabase.AddObjectToAsset(featureInstance, rendererData);
+            // Use SerializedObject to append to m_RendererFeatures to avoid YAML block assertion issues
+            if (!AddFeatureToRendererDataSerialized(rendererData, featureInstance))
             {
-                EditorUtility.SetDirty(featureInstance);
-                EditorUtility.SetDirty(rendererData);
-                var path = AssetDatabase.GetAssetPath(rendererData);
-                if (!string.IsNullOrEmpty(path))
-                {
-                    AssetDatabase.ImportAsset(path);
-                }
-                AssetDatabase.SaveAssets();
+                // Fallback to list add if serialized path failed
+                featuresList.Add(featureInstance);
             }
+            featureAdded = true;
+
+        }
+
+        bool settingsDirty = ConfigureOutlineFeatureInstance(featureInstance, previewRoot);
+        if (rendererEditable && (featureAdded || settingsDirty))
+        {
+            EditorUtility.SetDirty(featureInstance);
+            EditorUtility.SetDirty(rendererData);
+            var path = AssetDatabase.GetAssetPath(rendererData);
+            if (!string.IsNullOrEmpty(path))
+            {
+                AssetDatabase.ImportAsset(path);
+            }
+            AssetDatabase.SaveAssets();
+        }
     }
 
     private static bool AddFeatureToRendererDataSerialized(ScriptableObject rendererData, ScriptableObject feature)
@@ -414,27 +414,27 @@ public class AnimationPreviewStage : PreviewSceneStage
             return false;
         }
 
-            var so = new SerializedObject(rendererData);
-            var featuresProp = so.FindProperty("m_RendererFeatures");
-            if (featuresProp == null || !featuresProp.isArray)
-            {
-                return false;
-            }
+        var so = new SerializedObject(rendererData);
+        var featuresProp = so.FindProperty("m_RendererFeatures");
+        if (featuresProp == null || !featuresProp.isArray)
+        {
+            return false;
+        }
 
-            int newIndex = featuresProp.arraySize;
-            featuresProp.InsertArrayElementAtIndex(newIndex);
-            var element = featuresProp.GetArrayElementAtIndex(newIndex);
-            element.objectReferenceValue = feature;
+        int newIndex = featuresProp.arraySize;
+        featuresProp.InsertArrayElementAtIndex(newIndex);
+        var element = featuresProp.GetArrayElementAtIndex(newIndex);
+        element.objectReferenceValue = feature;
 
-            // Optionally clear the feature map so Unity rebuilds it (if present)
-            var mapProp = so.FindProperty("m_RendererFeatureMap");
-            if (mapProp != null && mapProp.isArray)
-            {
-                mapProp.ClearArray();
-            }
+        // Optionally clear the feature map so Unity rebuilds it (if present)
+        var mapProp = so.FindProperty("m_RendererFeatureMap");
+        if (mapProp != null && mapProp.isArray)
+        {
+            mapProp.ClearArray();
+        }
 
-            so.ApplyModifiedPropertiesWithoutUndo();
-            return true;
+        so.ApplyModifiedPropertiesWithoutUndo();
+        return true;
     }
 
     private static bool TryInstantiatePlayerModelPrefab(GameObject source, Scene targetScene, out GameObject instance)

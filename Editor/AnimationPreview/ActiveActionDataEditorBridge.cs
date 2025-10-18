@@ -16,7 +16,7 @@ namespace Quantum
     // migrated from the original ActiveActionData.Editor.cs implementation.
     internal static class ActiveActionDataEditorBridge
     {
-    internal class EditorState
+        internal class EditorState
         {
             public GameObject TempPreviewGO;
             public bool PreviewPlaying;
@@ -41,7 +41,7 @@ namespace Quantum
             return _states.GetValue(a, _ => new EditorState());
         }
 
-    internal static EditorState GetState(ActiveActionData a) => _states.TryGetValue(a, out var s) ? s : null;
+        internal static EditorState GetState(ActiveActionData a) => _states.TryGetValue(a, out var s) ? s : null;
 
         public static bool HasActivePreviewPlayer(ActiveActionData a)
         {
@@ -344,11 +344,13 @@ namespace Quantum
                 case int[] array when array.Length >= 2:
                     for (int i = 0; i + 1 < array.Length; i += 2)
                     {
-                        int start = array[i]; int end = array[i + 1]; if (start < 0 && end < 0) continue; if (start < 0) start = 0; if (end < 0) end = maxFrameIndex; start = Mathf.Clamp(start, 0, maxFrameIndex); end = Mathf.Clamp(end, 0, maxFrameIndex); if (end < start) { int swap = start; start = end; end = swap; } candidate.Segments.Add(new TrackSegment { Start = start, End = end }); hasData = true;
+                        int start = array[i]; int end = array[i + 1]; if (start < 0 && end < 0) continue; if (start < 0) start = 0; if (end < 0) end = maxFrameIndex; start = Mathf.Clamp(start, 0, maxFrameIndex); end = Mathf.Clamp(end, 0, maxFrameIndex); if (end < start) { int swap = start; start = end; end = swap; }
+                        candidate.Segments.Add(new TrackSegment { Start = start, End = end }); hasData = true;
                     }
                     break;
                 case IActionAffectWindow window when window != null:
-                    int winStart = window.IntraActionStartFrame; int winEnd = window.IntraActionEndFrame; if (winStart < 0 && winEnd < 0) break; if (winStart < 0) winStart = 0; if (winEnd < 0) winEnd = maxFrameIndex; winStart = Mathf.Clamp(winStart, 0, maxFrameIndex); winEnd = Mathf.Clamp(winEnd, 0, maxFrameIndex); if (winEnd >= winStart) { candidate.Segments.Add(new TrackSegment { Start = winStart, End = winEnd }); hasData = true; } break;
+                    int winStart = window.IntraActionStartFrame; int winEnd = window.IntraActionEndFrame; if (winStart < 0 && winEnd < 0) break; if (winStart < 0) winStart = 0; if (winEnd < 0) winEnd = maxFrameIndex; winStart = Mathf.Clamp(winStart, 0, maxFrameIndex); winEnd = Mathf.Clamp(winEnd, 0, maxFrameIndex); if (winEnd >= winStart) { candidate.Segments.Add(new TrackSegment { Start = winStart, End = winEnd }); hasData = true; }
+                    break;
             }
             if (!hasData) { candidate.IsAvailable = true; candidate.Clear(); return false; }
             row = candidate; return true;
@@ -374,7 +376,8 @@ namespace Quantum
 
         private static bool IsSceneTrackRowActive(SceneTrackRow row, int currentFrame)
         {
-            if (row == null) return false; for (int i = 0; i < row.Segments.Count; i++) { var seg = row.Segments[i]; if (currentFrame >= seg.Start && currentFrame <= seg.End) return true; } for (int i = 0; i < row.Markers.Count; i++) if (row.Markers[i] == currentFrame) return true; return false;
+            if (row == null) return false; for (int i = 0; i < row.Segments.Count; i++) { var seg = row.Segments[i]; if (currentFrame >= seg.Start && currentFrame <= seg.End) return true; }
+            for (int i = 0; i < row.Markers.Count; i++) if (row.Markers[i] == currentFrame) return true; return false;
         }
 
         private static float ResolvePreviewFPS(ActiveActionData a, float fallback)

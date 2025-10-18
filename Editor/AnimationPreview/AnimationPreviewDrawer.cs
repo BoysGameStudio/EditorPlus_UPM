@@ -168,8 +168,8 @@ public sealed partial class AnimationPreviewDrawer : OdinAttributeDrawer<Animati
         // object (domain reloads, nested serialization, etc.). Use the current
         // selection as a best-effort fallback so the timeline still appears in
         // the Inspector when the inspected object is selected.
-    var sel = UnityEditor.Selection.activeObject;
-    if (sel != null && sel != clipValue) return sel;
+        var sel = UnityEditor.Selection.activeObject;
+        if (sel != null && sel != clipValue) return sel;
 
         return null;
     }

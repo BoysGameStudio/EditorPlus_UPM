@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
+
 using UnityEngine;
 
 namespace EditorPlus.AnimationPreview
@@ -16,8 +17,8 @@ namespace EditorPlus.AnimationPreview
         internal static readonly Dictionary<int, WindowDragState> WindowBodyDragStates = new();
         internal static readonly Dictionary<Type, TrackMember[]> TrackMembersCache = new();
 
-            // When true, the timeline will draw scene gizmos for markers even when no runtime preview is active.
-            public static bool AlwaysShowMarkers = true;
+        // When true, the timeline will draw scene gizmos for markers even when no runtime preview is active.
+        public static bool AlwaysShowMarkers = true;
 
         // Decoupled: we no longer reference ActiveActionData at compile time.
         internal static readonly object[] SeekPreviewArgs = new object[1];
